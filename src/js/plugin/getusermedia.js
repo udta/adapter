@@ -9,9 +9,16 @@
 'use strict';
 var logging = require('../utils.js').log;
 
+var getPlugin = function () {
+        return document.getElementById('IPVTPluginId');
+};
+var extractPluginObj = function (elt) {
+        return elt.isWebRtcPlugin ? elt : elt.pluginObj;
+};
+
 // Expose public methods.
 module.exports = function() {
-  var constraintsToChrome_ = function(c) {
+  var constraintsToPlugin_ = function(c) {
     if (typeof c !== 'object' || c.mandatory || c.optional) {
       return c;
     }
@@ -63,11 +70,9 @@ module.exports = function() {
   };
 
   var shimConstraints_ = function(constraints, func) {
-    logging('chrome: input constraints is: ' + JSON.stringify(constraints));
-
     constraints = JSON.parse(JSON.stringify(constraints));
     if (constraints && constraints.audio) {
-      constraints.audio = constraintsToChrome_(constraints.audio);
+      constraints.audio = constraintsToPlugin_(constraints.audio);
     }
     if (constraints && typeof constraints.video === 'object') {
       // Shim facingMode for mobile, where it defaults to "user".
@@ -93,15 +98,15 @@ module.exports = function() {
               constraints.video.deviceId = face.exact ? {exact: back.deviceId} :
                                                         {ideal: back.deviceId};
             }
-            constraints.video = constraintsToChrome_(constraints.video);
-            logging('chrome: ' + JSON.stringify(constraints));
+            constraints.video = constraintsToPlugin_(constraints.video);
+            logging('plugin: ' + JSON.stringify(constraints));
             return func(constraints);
           });
         }
       }
-      constraints.video = constraintsToChrome_(constraints.video);
+      constraints.video = constraintsToPlugin_(constraints.video);
     }
-    logging('chrome: ' + JSON.stringify(constraints));
+    logging('pulgin: ' + JSON.stringify(constraints));
     return func(constraints);
   };
 
@@ -119,12 +124,29 @@ module.exports = function() {
     };
   };
 
-  var getUserMedia_ = function(constraints, onSuccess, onError) {
-    shimConstraints_(constraints, function(c) {
-      navigator.webkitGetUserMedia(c, onSuccess, function(e) {
-        onError(shimError_(e));
-      });
-    });
+  var getUserMedia_ = function (constraints, onSuccess, onError) {
+        if (document.readyState !== "complete") {
+            logging("readyState = " + document.readyState + ", delaying getUserMedia...");
+            if ( !getUserMediaDelayed ) {
+                getUserMediaDelayed = true;
+                this.shimAttachEventListener(document, "readystatechange", function () {
+                    if (getUserMediaDelayed && document.readyState == "complete") {
+                        getUserMediaDelayed = false;
+                        shimConstraints_(constraints, function(c) {
+                           getPlugin().getUserMedia(c, onSuccess, function(e) {
+                               onError(shimError_(e));
+                           });
+                        });
+                    }
+                });
+            }
+        } else {
+            shimConstraints_(constraints, function(c) {
+                getPlugin().getUserMedia(c, onSuccess, function(e) {
+                    onError(shimError_(e));
+                });
+            });
+       }
   };
 
   navigator.getUserMedia = getUserMedia_;
@@ -136,53 +158,24 @@ module.exports = function() {
     });
   };
 
+  //For export the mediaDevices
   if (!navigator.mediaDevices) {
-    navigator.mediaDevices = {
-      getUserMedia: getUserMediaPromise_,
-      enumerateDevices: function() {
-        return new Promise(function(resolve) {
-          var kinds = {audio: 'audioinput', video: 'videoinput'};
-          return MediaStreamTrack.getSources(function(devices) {
-            resolve(devices.map(function(device) {
-              return {label: device.label,
-                      kind: kinds[device.kind],
-                      deviceId: device.id,
-                      groupId: ''};
-            }));
-          });
-        });
-      }
-    };
-  }
-
-  // A shim for getUserMedia method on the mediaDevices object.
-  // TODO(KaptenJansson) remove once implemented in Chrome stable.
-  if (!navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia = function(constraints) {
+    navigator.mediaDevices = { getUserMedia: function(constraints) {
       return getUserMediaPromise_(constraints);
-    };
-  } else {
-    // Even though Chrome 45 has navigator.mediaDevices and a getUserMedia
-    // function which returns a Promise, it does not accept spec-style
-    // constraints.
-    var origGetUserMedia = navigator.mediaDevices.getUserMedia.
-        bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = function(cs) {
-      return shimConstraints_(cs, function(c) {
-        return origGetUserMedia(c).then(function(stream) {
-          if (c.audio && !stream.getAudioTracks().length ||
-              c.video && !stream.getVideoTracks().length) {
-            stream.getTracks().forEach(function(track) {
-              track.stop();
-            });
-            throw new DOMException('', 'NotFoundError');
-          }
-          return stream;
-        }, function(e) {
-          return Promise.reject(shimError_(e));
-        });
-      });
-    };
+    },
+      enumerateDevices: function() {
+          return new Promise(function(resolve) {
+                  var kinds = { audio: 'audioinput', video: 'videoinput' };
+                  return getSources(function(devices) {
+                          resolve(devices.map(function(device) {
+                                  return { label: device.label,
+                                         kind: kinds[device.kind],
+                                         deviceId: device.id,
+                                         groupId: '' };
+                              }));
+                      });
+              });
+      } };
   }
 
   // Dummy devicechange event methods.

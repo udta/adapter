@@ -8,7 +8,7 @@
  /* eslint-env node */
 'use strict';
 
-var logDisabled_ = true;
+var logDisabled_ = false;
 
 // Utility methods.
 var utils = {
@@ -64,23 +64,52 @@ var utils = {
       return result;
     }
 
-    // Firefox.
-    if (navigator.mozGetUserMedia) {
+    // Edge.
+     if (navigator.mediaDevices &&
+        navigator.userAgent.match(/Edge\/(\d+).(\d+)$/)) {
+      result.browser = 'edge';
+      result.version = this.extractVersion(navigator.userAgent,
+          /Edge\/(\d+).(\d+)$/, 2);
+    
+    } // IE
+    else if ( !navigator.mediaDevices && ( !!window.ActiveXObject 
+                                         || 'ActiveXObject' in window  ||
+                                         navigator.userAgent.match(/MSIE (\d+)/) 
+                                         || navigator.userAgent.match(/rv:(\d+)/) ) ) {
+      result.browser = 'ie';
+      result.version = this.extractVersion(navigator.userAgent,
+          /MSIE (\d+).(\d+)/, 1);
+
+      /*For IE 11*/
+      if (navigator.userAgent.match(/rv:(\d+)/)) {
+          result.version = this.extractVersion(navigator.userAgent, /rv:(\d+).(\d+)/, 1);
+      }
+
+      // Firefox.
+    } else if (navigator.mozGetUserMedia) {
       result.browser = 'firefox';
       result.version = this.extractVersion(navigator.userAgent,
           /Firefox\/([0-9]+)\./, 1);
 
     // all webkit-based browsers
-    } else if (navigator.webkitGetUserMedia) {
+    } else if (navigator.webkitGetUserMedia && window.webkitRTCPeerConnection) {
       // Chrome, Chromium, Webview, Opera, all use the chrome shim for now
-      if (window.webkitRTCPeerConnection) {
-        result.browser = 'chrome';
-        result.version = this.extractVersion(navigator.userAgent,
-          /Chrom(e|ium)\/([0-9]+)\./, 2);
-
-      // Safari or unknown webkit-based
-      // for the time being Safari has support for MediaStreams but not webRTC
+      var isOpera = navigator.userAgent.match(/(OPR|Opera).([\d.]+)/) ? true : false;
+      if (isOpera) {
+          result.browser = 'opera';
+          result.version = this.extractVersion(navigator.userAgent,
+              /O(PR|pera)\/([0-9]+)\./, 2);
       } else {
+          result.browser = 'chrome';
+          result.version = this.extractVersion(navigator.userAgent,
+              /Chrom(e|ium)\/([0-9]+)\./, 2);
+      }
+
+    // Safari or unknown webkit-based
+    // for the time being Safari has support for MediaStreams but not webRTC
+    //Safari without webRTC and with partly webRTC support
+    } else if ( (!navigator.webkitGetUserMedia && navigator.userAgent.match(/AppleWebKit\/([0-9]+)\./) ) 
+         || (navigator.webkitGetUserMedia && !navigator.webkitRTCPeerConnection) ) {
         // Safari UA substrings of interest for reference:
         // - webkit version:           AppleWebKit/602.1.25 (also used in Op,Cr)
         // - safari UI version:        Version/9.0.3 (unique to Safari)
@@ -103,15 +132,6 @@ var utils = {
               'with GUM support but no WebRTC support.';
           return result;
         }
-      }
-
-    // Edge.
-    } else if (navigator.mediaDevices &&
-        navigator.userAgent.match(/Edge\/(\d+).(\d+)$/)) {
-      result.browser = 'edge';
-      result.version = this.extractVersion(navigator.userAgent,
-          /Edge\/(\d+).(\d+)$/, 2);
-
     // Default fallthrough: not supported.
     } else {
       result.browser = 'Not a supported browser.';

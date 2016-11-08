@@ -30,6 +30,7 @@
   var edgeShim = require('./edge/edge_shim') || null;
   var firefoxShim = require('./firefox/firefox_shim') || null;
   var safariShim = require('./safari/safari_shim') || null;
+  var pluginShim = require('./plugin/plugin_shim') || null;
 
   // Shim browser if found.
   switch (browserDetails.browser) {
@@ -48,6 +49,8 @@
       chromeShim.shimSourceObject();
       chromeShim.shimPeerConnection();
       chromeShim.shimOnTrack();
+      browserDetails.isSupportWebRTC = true;
+      browserDetails.isSupportORTC = false;
       break;
     case 'firefox':
       if (!firefoxShim || !firefoxShim.shimPeerConnection) {
@@ -62,6 +65,8 @@
       firefoxShim.shimSourceObject();
       firefoxShim.shimPeerConnection();
       firefoxShim.shimOnTrack();
+      browserDetails.isSupportWebRTC = true;
+      browserDetails.isSupportORTC = false;
       break;
     case 'edge':
       if (!edgeShim || !edgeShim.shimPeerConnection) {
@@ -74,17 +79,76 @@
 
       edgeShim.shimGetUserMedia();
       edgeShim.shimPeerConnection();
+      browserDetails.isSupportWebRTC = false;
+      browserDetails.isSupportORTC = true;
       break;
     case 'safari':
-      if (!safariShim) {
-        logging('Safari shim is not included in this adapter release.');
-        return;
-      }
-      logging('adapter.js shimming safari.');
-      // Export to the adapter global object visible in the browser.
-      module.exports.browserShim = safariShim;
+      if (navigator.webkitGetUserMedia) {
+          if (!safariShim) {
+            logging('Safari shim is not included in this adapter release.');
+            return;
+          }
 
-      safariShim.shimGetUserMedia();
+          // Export to the adapter global object visible in the browser.
+          module.exports.browserShim = safariShim;
+          safariShim.shimGetUserMedia();
+          logging('adapter.js shimming safari.');
+      } else {
+          if (!pluginShim||!pluginShim.shimPeerConnection) {
+              logging('Safari Plugin shim is not included in this adapter release.');
+              return;
+            }
+
+          // init  You need to call loadPlugin() first of all....
+          browserDetails.isSupportWebRTC = false;
+          browserDetails.isSupportORTC = false;
+          browserDetails.isWebRTCPluginInstalled = undefined; //Means the plugin installation is not start yet.
+          browserDetails.WebRTCPluginVersion = undefined;
+          // Export to the adapter global object visible in the browser.
+          module.exports.browserShim = pluginShim;
+          
+          pluginShim.loadPlugin();
+          //set function handlers
+          pluginShim.shimGetUserMedia();
+          window.RTCPeerConnection = pluginShim.shimPeerConnection;
+          //pluginShim.shimPeerConnection();
+          window.RTCIceCandidate = pluginShim.shimRTCIceCandidate;
+          window.RTCSessionDescription = pluginShim.shimRTCSessionDescription;
+          window.attachMediaStream = pluginShim.attachMediaStream;
+          window.loadWindows = pluginShim.loadWindows;
+
+          //pluginShim.shimOnTrack();
+          logging('adapter.js shimming safari with plugin');
+      }
+      break;
+    case 'ie':
+      if (!pluginShim||!pluginShim.shimPeerConnection) {
+          logging('IE Plugin shim is not included in this adapter release.');
+          return;
+        }
+        
+
+      logging('adapter.js shimming IE!');
+
+      // init  You need to call loadPlugin() first of all....
+      browserDetails.isSupportWebRTC = false;
+      browserDetails.isSupportORTC = false;
+      browserDetails.isWebRTCPluginInstalled = undefined; //Means the plugin installation is not start yet.
+      browserDetails.WebRTCPluginVersion = undefined;
+      // Export to the adapter global object visible in the browser.
+      module.exports.browserShim = pluginShim;
+      pluginShim.loadPlugin();
+      
+      //set function handlers
+      pluginShim.shimGetUserMedia();
+      window.RTCPeerConnection = pluginShim.shimPeerConnection;
+      //pluginShim.shimPeerConnection();
+      window.RTCIceCandidate = pluginShim.shimRTCIceCandidate;
+      window.RTCSessionDescription = pluginShim.shimRTCSessionDescription;
+      window.attachMediaStream = pluginShim.attachMediaStream;
+      window.loadWindows = pluginShim.loadWindows;
+
+      //pluginShim.shimOnTrack();
       break;
     default:
       logging('Unsupported browser!');
