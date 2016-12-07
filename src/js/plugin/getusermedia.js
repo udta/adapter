@@ -15,6 +15,23 @@ var getPlugin = function () {
 var extractPluginObj = function (elt) {
         return elt.isWebRtcPlugin ? elt : elt.pluginObj;
 };
+var getSources = function (gotSources) { // not part of the standard (at least, haven't found it)
+    if (document.readyState !== "complete") {
+        console.log("readyState = " + document.readyState + ", delaying getSources...");
+        if (!getSourcesDelayed) {
+            getSourcesDelayed = true;
+            document.addEventListener( "readystatechange", function () {
+                if (getSourcesDelayed && document.readyState == "complete") {
+                    getSourcesDelayed = false;
+                    getPlugin().getSources(gotSources);
+                }
+            });
+        }
+    }
+    else {
+        getPlugin().getSources(gotSources);
+    }
+};
 
 // Expose public methods.
 module.exports = function() {

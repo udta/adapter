@@ -19,6 +19,8 @@
   module.exports.extractVersion = require('./utils').extractVersion;
   module.exports.disableLog = require('./utils').disableLog;
 
+  window.browserDetails = browserDetails;
+
   // Uncomment the line below if you want logging to occur, including logging
   // for the switch statement below. Can also be turned on in the browser via
   // adapter.disableLog(false), but then logging from the switch statement below
@@ -51,6 +53,10 @@
       chromeShim.shimOnTrack();
       browserDetails.isSupportWebRTC = true;
       browserDetails.isSupportORTC = false;
+      browserDetails.isWebRTCPluginInstalled = false;
+      browserDetails.WebRTCPluginVersion = undefined;
+      window.attachMediaStream = chromeShim.attachMediaStream;
+
       break;
     case 'firefox':
       if (!firefoxShim || !firefoxShim.shimPeerConnection) {
@@ -67,6 +73,10 @@
       firefoxShim.shimOnTrack();
       browserDetails.isSupportWebRTC = true;
       browserDetails.isSupportORTC = false;
+      browserDetails.isWebRTCPluginInstalled = false;
+      browserDetails.WebRTCPluginVersion = undefined;
+      window.attachMediaStream = firefoxShim.attachMediaStream;
+
       break;
     case 'edge':
       if (!edgeShim || !edgeShim.shimPeerConnection) {
@@ -79,8 +89,12 @@
 
       edgeShim.shimGetUserMedia();
       edgeShim.shimPeerConnection();
-      browserDetails.isSupportWebRTC = false;
+      browserDetails.isSupportWebRTC = false;//TODO: New Edge support WebRTC
       browserDetails.isSupportORTC = true;
+      browserDetails.isWebRTCPluginInstalled = false;
+      browserDetails.WebRTCPluginVersion = undefined;
+      window.attachMediaStream = edgeShim.attachMediaStream;
+
       break;
     case 'safari':
       if (navigator.webkitGetUserMedia) {
@@ -107,7 +121,7 @@
           // Export to the adapter global object visible in the browser.
           module.exports.browserShim = pluginShim;
           
-          pluginShim.loadPlugin();
+          //pluginShim.loadPlugin(); 
           //set function handlers
           pluginShim.shimGetUserMedia();
           window.RTCPeerConnection = pluginShim.shimPeerConnection;
@@ -116,6 +130,7 @@
           window.RTCSessionDescription = pluginShim.shimRTCSessionDescription;
           window.attachMediaStream = pluginShim.attachMediaStream;
           window.loadWindows = pluginShim.loadWindows;
+          window.loadScreens = pluginShim.loadScreens;
 
           //pluginShim.shimOnTrack();
           logging('adapter.js shimming safari with plugin');
@@ -137,7 +152,7 @@
       browserDetails.WebRTCPluginVersion = undefined;
       // Export to the adapter global object visible in the browser.
       module.exports.browserShim = pluginShim;
-      pluginShim.loadPlugin();
+      //pluginShim.loadPlugin();
       
       //set function handlers
       pluginShim.shimGetUserMedia();
@@ -147,6 +162,7 @@
       window.RTCSessionDescription = pluginShim.shimRTCSessionDescription;
       window.attachMediaStream = pluginShim.attachMediaStream;
       window.loadWindows = pluginShim.loadWindows;
+      //window.loadScreens = pluginShim.loadScreens; //Haven't support
 
       //pluginShim.shimOnTrack();
       break;

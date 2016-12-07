@@ -25,24 +25,6 @@ var extractPluginObj = function (elt) {
     return elt.isWebRtcPlugin ? elt : elt.pluginObj;
 };
 // http://www.w3.org/TR/mediacapture-streams/#idl-def-MediaStreamTrack
-var getSources = function (gotSources) { // not part of the standard (at least, haven't found it)
-    if (document.readyState !== "complete") {
-        console.log("readyState = " + document.readyState + ", delaying getSources...");
-        if (!getSourcesDelayed) {
-            getSourcesDelayed = true;
-            document.addEventListener( "readystatechange", function () {
-                if (getSourcesDelayed && document.readyState == "complete") {
-                    getSourcesDelayed = false;
-                    getPlugin().getSources(gotSources);
-                }
-            });
-        }
-    }
-    else {
-        getPlugin().getSources(gotSources);
-    }
-};
-
 var installPlugin = function() {
         if (document.getElementById("IPVTPluginId")) {
            if (document.getElementById("IPVTPluginId").versionName != undefined) {
@@ -454,7 +436,32 @@ var pluginShim = {
                 logging("Plugin with support for getWindowList not installed");
             }
         }
+   },
+  //For Safari only
+  shimLoadScreens: function() {
+        if (getPlugin()) {
+            if (typeof getPlugin().getScreenList !== 'undefined') {
+                var screenArray = [];
+                var screenStr = getPlugin().getScreenList();
+                var screenList = screenStr.split(/xxz;;;xxz/);
+                for (var i = 0; i < screenList.length; ++i) {
+                    var screenValues = screenList[i].split(/xxy;;;xxy/);
+                    var option = { screenId: "", screenName: "", previewImg64: null };
+                    option.screenId = screenValues[0];
+                    option.screenName = screenValues[1];
+                    option.previewImg64 = screenValues[2]; // Preview encoded as bas64
+                    if ( option.screenId != "" ) {
+                        screenArray[i] = option;
+                    }
+                }
+                return screenArray;
+            }
+            else {
+                logging("Plugin with support for getScreenList not installed");
+            }
+        }
    }
+
 
 };
 
@@ -470,6 +477,7 @@ module.exports = {
   //shimInstallPlugin: pluginShim.installPlugin,
   shimAttachEventListener: pluginShim.attachEventListener,
   loadWindows: pluginShim.shimLoadWindows,
+  loadScreens: pluginShim.shimLoadScreens,
   checkPlugin: pluginShim.checkPlugin,
   loadPlugin: pluginShim.loadPlugin
  //reattachMediaStream: pluginShim.reattachMediaStream
