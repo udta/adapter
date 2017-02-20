@@ -12,12 +12,13 @@
 // Shimming starts here.
 (function() {
   // Utils.
-  var logging = require('./utils').log;
-  var browserDetails = require('./utils').browserDetails;
+  var utils = require('./utils');
+  var logging = utils.log;
+  var browserDetails = utils.browserDetails;
   // Export to the adapter global object visible in the browser.
   module.exports.browserDetails = browserDetails;
-  module.exports.extractVersion = require('./utils').extractVersion;
-  module.exports.disableLog = require('./utils').disableLog;
+  module.exports.extractVersion = utils.extractVersion;
+  module.exports.disableLog = utils.disableLog;
 
   window.browserDetails = browserDetails;
 
@@ -36,7 +37,6 @@
 
   // Shim browser if found.
   switch (browserDetails.browser) {
-    case 'opera': // fallthrough as it uses chrome shims
     case 'chrome':
       if (!chromeShim || !chromeShim.shimPeerConnection) {
         logging('Chrome shim is not included in this adapter release.');
@@ -48,6 +48,7 @@
 
       chromeShim.shimGetUserMedia();
       chromeShim.shimMediaStream();
+      utils.shimCreateObjectURL();
       chromeShim.shimSourceObject();
       chromeShim.shimPeerConnection();
       chromeShim.shimOnTrack();
@@ -57,6 +58,7 @@
       browserDetails.WebRTCPluginVersion = undefined;
       window.attachMediaStream = chromeShim.attachMediaStream;
 
+      chromeShim.shimGetSendersWithDtmf();
       break;
     case 'firefox':
       if (!firefoxShim || !firefoxShim.shimPeerConnection) {
@@ -68,6 +70,7 @@
       module.exports.browserShim = firefoxShim;
 
       firefoxShim.shimGetUserMedia();
+      utils.shimCreateObjectURL();
       firefoxShim.shimSourceObject();
       firefoxShim.shimPeerConnection();
       firefoxShim.shimOnTrack();
@@ -88,8 +91,15 @@
       module.exports.browserShim = edgeShim;
 
       edgeShim.shimGetUserMedia();
-      edgeShim.shimPeerConnection();
-      browserDetails.isSupportWebRTC = false;//TODO: New Edge support WebRTC
+      utils.shimCreateObjectURL();
+      if ( browserDetails.version >= 15009 ) {
+         //New Edge support WebRTC
+         browserDetails.isSupportWebRTC = true;
+      } else {
+         edgeShim.shimPeerConnection();
+         browserDetails.isSupportWebRTC = false;
+      }
+      
       browserDetails.isSupportORTC = true;
       browserDetails.isWebRTCPluginInstalled = false;
       browserDetails.WebRTCPluginVersion = undefined;

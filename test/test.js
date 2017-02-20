@@ -40,60 +40,6 @@ test('Log suppression', function(t) {
   t.end();
 });
 
-// Fiddle with the UA string to test the extraction does not throw errors.
-// No need for webdriver in this test.
-test('Browser version extraction helper', function(t) {
-  var utils = require('../src/js/utils.js');
-
-  // Chrome and Chromium.
-  var ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like ' +
-      'Gecko) Chrome/45.0.2454.101 Safari/537.36';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), 45,
-      'version extraction');
-
-  ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like ' +
-      'Gecko) Ubuntu Chromium/45.0.2454.85 Chrome/45.0.2454.85 Safari/537.36';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), 45,
-      'version extraction');
-
-  // Various UA strings from device simulator, not matching.
-  ua = 'Mozilla/5.0 (Linux; Android 4.3; Nexus 10 Build/JSS15Q) ' +
-      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2307.2 Safari/537.36';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), 42,
-      'version extraction');
-
-  ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 8_0 like Mac OS X) ' +
-      'AppleWebKit/600.1.3 (KHTML, like Gecko) Version/8.0 Mobile/12A4345d ' +
-      'Safari/600.1.4';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), null,
-      'version extraction');
-
-  ua = 'Mozilla/5.0 (Linux; U; en-us; KFAPWI Build/JDQ39) AppleWebKit/535.19' +
-      '(KHTML, like Gecko) Silk/3.13 Safari/535.19 Silk-Accelerated=true';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), null,
-      'version extraction');
-
-  // Opera, should match chrome/webrtc version 45.0 not Opera 32.0.
-  ua = 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like ' +
-      'Gecko) Chrome/45.0.2454.85 Safari/537.36 OPR/32.0.1948.44';
-  t.equal(utils.extractVersion(ua, /Chrom(e|ium)\/([0-9]+)\./, 2), 45,
-      'version extraction');
-
-  // Edge, extract build number.
-  ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, ' +
-      'like Gecko) Chrome/46.0.2486.0 Safari/537.36 Edge/13.10547';
-  t.equal(utils.extractVersion(ua, /Edge\/(\d+).(\d+)$/, 2), 10547,
-      'version extraction');
-
-  // Firefox.
-  ua = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:44.0) Gecko/20100101 ' +
-      'Firefox/44.0';
-  t.equal(utils.extractVersion(ua, /Firefox\/([0-9]+)\./, 1), 44,
-      'version extraction');
-
-  t.end();
-});
-
 test('Browser identified', function(t) {
   var driver = seleniumHelpers.buildDriver();
 
@@ -360,9 +306,6 @@ test('Video srcObject getter/setter test', function(t) {
     return driver.executeScript(
         'return document.getElementById(\'video\').srcObject.id')
     .then(function(srcObjectId) {
-      return srcObjectId;
-    })
-    .then(function(srcObjectId) {
       driver.executeScript('return window.stream.id')
       .then(function(streamId) {
         t.ok(srcObjectId === streamId,
@@ -436,6 +379,84 @@ test('Audio srcObject getter/setter test', function(t) {
   })
   .then(function() {
     t.end();
+  })
+  .then(null, function(err) {
+    if (err !== 'skip-test') {
+      t.fail(err);
+    }
+    t.end();
+  });
+});
+
+test('createObjectURL shim test', function(t) {
+  var driver = seleniumHelpers.buildDriver();
+
+  // Define test.
+  var testDefinition = function() {
+    var callback = arguments[arguments.length - 1];
+
+    ['audio', 'video'].reduce(function(p, type) {
+      return p.then(function() {
+        var constraints = {fake: true};
+        constraints[type] = true;
+        return navigator.mediaDevices.getUserMedia(constraints);
+      })
+      .then(function(stream) {
+        var element = document.createElement(type);
+        window[type] = element;
+        window[type + 'Stream'] = stream;
+        element.id = type;
+        element.autoplay = true;
+        // Test both ways of setting src
+        if (type === 'audio') {
+          element.src = URL.createObjectURL(stream);
+        } else {
+          element.setAttribute('src', URL.createObjectURL(stream));
+        }
+        return new Promise(function(resolve) {
+          element.addEventListener('loadedmetadata', resolve);
+        });
+      });
+    }, Promise.resolve())
+    .then(function() {
+      document.body.appendChild(window.audio);
+      document.body.appendChild(window.video);
+      callback(null);
+    })
+    .catch(function(err) {
+      callback(err.name);
+    });
+  };
+
+  // Run test.
+  seleniumHelpers.loadTestPage(driver)
+  .then(function() {
+    t.plan(5);
+    t.pass('Page loaded');
+    return driver.executeAsyncScript(testDefinition);
+  })
+  .then(function(error) {
+    var gumResult = error ? 'error: ' + error : 'no errors';
+    t.ok(!error, 'getUserMedia result:  ' + gumResult);
+    // Wait until loadedmetadata event has fired and appended video element.
+    return driver.wait(webdriver.until.elementLocated(
+      webdriver.By.id('video')), 3000);
+  })
+  .then(function() {
+    return Promise.all([
+      'return document.getElementById("audio").srcObject.id',
+      'return window.audioStream.id',
+      'return document.getElementById("video").srcObject.id',
+      'return window.videoStream.id'
+    ].map(function(script) {
+      return driver.executeScript(script);
+    }))
+    .then(function(ids) {
+      t.ok(ids[0] === ids[1], 'audio srcObject getter returns audio stream');
+      t.ok(ids[2] === ids[3], 'video srcObject getter returns video stream');
+      t.ok(ids[0] !== ids[2], 'audio and video streams are different');
+      t.end();
+    });
   })
   .then(null, function(err) {
     if (err !== 'skip-test') {
@@ -1250,7 +1271,10 @@ test('Basic connection establishment with promise', function(t) {
     var dictionary = obj => JSON.parse(JSON.stringify(obj));
 
     var addCandidate = function(pc, event) {
-      pc.addIceCandidate(dictionary(event.candidate)).then(function() {
+      if (event.candidate) {
+        event.candidate = dictionary(event.candidate);
+      }
+      pc.addIceCandidate(event.candidate).then(function() {
         // TODO: Decide if we are interested in adding all candidates
         // as passed tests.
         tc.pass('addIceCandidate ' + counter++);
@@ -1454,6 +1478,62 @@ test('Basic connection establishment with datachannel', function(t) {
     }
     t.end();
   });
+});
+
+test('dtmf', t => {
+  var driver = seleniumHelpers.buildDriver();
+
+  var testDefinition = function() {
+    var callback = arguments[arguments.length - 1];
+
+    var pc1 = new RTCPeerConnection(null);
+    var pc2 = new RTCPeerConnection(null);
+
+    pc1.onicecandidate = e => pc2.addIceCandidate(e.candidate);
+    pc2.onicecandidate = e => pc1.addIceCandidate(e.candidate);
+    pc1.onnegotiationneeded = e => pc1.createOffer()
+      .then(offer => pc1.setLocalDescription(offer))
+      .then(() => pc2.setRemoteDescription(pc1.localDescription))
+      .then(() => pc2.createAnswer())
+      .then(answer => pc2.setLocalDescription(answer))
+      .then(() => pc1.setRemoteDescription(pc2.localDescription));
+
+    navigator.mediaDevices.getUserMedia({audio: true})
+    .then(stream => {
+      pc1.addStream(stream);
+      return new Promise(resolve => pc1.oniceconnectionstatechange =
+        e => pc1.iceConnectionState === 'connected' && resolve());
+    })
+    .then(() => {
+      let sender = pc1.getSenders().find(s => s.track.kind === 'audio');
+      if (!sender.dtmf) {
+        throw 'skip-test';
+      }
+      sender.dtmf.insertDTMF('1');
+      return new Promise(resolve => sender.dtmf.ontonechange = resolve);
+    })
+    .then(e => callback({tone: e.tone}),
+          err => callback({error: err.toString()}));
+  };
+
+  // Run test.
+  seleniumHelpers.loadTestPage(driver).then(() => {
+    t.pass('Page loaded');
+    return driver.executeAsyncScript(testDefinition);
+  })
+  .then(({tone, error}) => {
+    if (error) {
+      if (error === 'skip-test') {
+        t.skip('No sender.dtmf support in this browser.');
+      } else {
+        t.fail('PeerConnection failure: ' + error);
+      }
+      return;
+    }
+    t.is(tone, '1', 'DTMF sent');
+  })
+  .then(null, err => t.fail(err))
+  .then(() => t.end());
 });
 
 test('addIceCandidate with null', function(t) {
@@ -1898,6 +1978,48 @@ test('iceTransportPolicy relay functionality',
       });
     });
 
+test('icegatheringstatechange event',
+    {skip: process.env.BROWSER !== 'MicrosoftEdge'},
+    function(t) {
+      var driver = seleniumHelpers.buildDriver();
+
+      // Define test.
+      var testDefinition = function() {
+        var callback = arguments[arguments.length - 1];
+
+        var pc1 = new RTCPeerConnection();
+        pc1.onicegatheringstatechange = function(event) {
+          callback(pc1.iceGatheringState);
+        };
+
+        var constraints = {video: true, fake: true};
+        navigator.mediaDevices.getUserMedia(constraints)
+        .then(function(stream) {
+          pc1.addStream(stream);
+          pc1.createOffer().then(function(offer) {
+            return pc1.setLocalDescription(offer);
+          });
+        });
+      };
+
+      // Run test.
+      seleniumHelpers.loadTestPage(driver)
+      .then(function() {
+        return driver.executeAsyncScript(testDefinition);
+      })
+      .then(function(iceGatheringState) {
+        t.ok(iceGatheringState === 'complete',
+            'gatheringstatechange fired and is \'complete\'');
+        t.end();
+      })
+      .then(null, function(err) {
+        if (err !== 'skip-test') {
+          t.fail(err);
+        }
+        t.end();
+      });
+    });
+
 test('static generateCertificate method', function(t) {
   var driver = seleniumHelpers.buildDriver();
 
@@ -1939,7 +2061,7 @@ test('static generateCertificate method', function(t) {
 });
 
 // ontrack is shimmed in Chrome so we test that it is called.
-test('ontrack', {skip: process.env.BROWSER === 'firefox'}, function(t) {
+test('ontrack', function(t) {
   var driver = seleniumHelpers.buildDriver();
 
   var testDefinition = function() {
@@ -2023,8 +2145,8 @@ test('ontrack', {skip: process.env.BROWSER === 'firefox'}, function(t) {
     });
   };
 
-  // plan for 7 tests.
-  t.plan(7);
+  // plan for 7 tests in Chrome (no getReceivers), 8 in FF and Edge.
+  t.plan(process.env.BROWSER === 'chrome' ? 7 : 8);
   // Run test.
   seleniumHelpers.loadTestPage(driver)
   .then(function() {
