@@ -94,6 +94,7 @@
       utils.shimCreateObjectURL();
       if ( browserDetails.version >= 15009 ) {
          //New Edge support WebRTC
+         edgeShim.shimPeerConnection();
          browserDetails.isSupportWebRTC = true;
       } else {
          edgeShim.shimPeerConnection();
