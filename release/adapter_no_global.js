@@ -234,10 +234,11 @@ SDPUtils.getDtlsParameters = function(mediaSection, sessionpart) {
     return line.indexOf('a=fingerprint:') === 0;
   })[0].substr(14);
   // Note: a=setup line is ignored since we use the 'auto' role.
+  // Note2: 'algorithm' is not case sensitive except in Edge.
   var dtlsParameters = {
     role: 'auto',
     fingerprints: [{
-      algorithm: fpLine.split(' ')[0],
+      algorithm: fpLine.split(' ')[0].toLowerCase(),
       value: fpLine.split(' ')[1]
     }]
   };
@@ -343,6 +344,15 @@ SDPUtils.writeRtpDescription = function(kind, caps) {
     sdp += SDPUtils.writeFmtp(codec);
     sdp += SDPUtils.writeRtcpFb(codec);
   });
+  var maxptime = 0;
+  caps.codecs.forEach(function(codec) {
+    if (codec.maxptime > maxptime) {
+      maxptime = codec.maxptime;
+    }
+  });
+  if (maxptime > 0) {
+    sdp += 'a=maxptime:' + maxptime + '\r\n';
+  }
   sdp += 'a=rtcp-mux\r\n';
 
   caps.headerExtensions.forEach(function(extension) {
@@ -389,7 +399,6 @@ SDPUtils.parseRtpEncodingParameters = function(mediaSection) {
         ssrc: primarySsrc,
         codecPayloadType: parseInt(codec.parameters.apt, 10),
         rtx: {
-          payloadType: codec.payloadType,
           ssrc: secondarySsrc
         }
       };
@@ -425,6 +434,61 @@ SDPUtils.parseRtpEncodingParameters = function(mediaSection) {
   return encodingParameters;
 };
 
+// parses http://draft.ortc.org/#rtcrtcpparameters*
+SDPUtils.parseRtcpParameters = function(mediaSection) {
+  var rtcpParameters = {};
+
+  var cname;
+  // Gets the first SSRC. Note that with RTX there might be multiple
+  // SSRCs.
+  var remoteSsrc = SDPUtils.matchPrefix(mediaSection, 'a=ssrc:')
+      .map(function(line) {
+        return SDPUtils.parseSsrcMedia(line);
+      })
+      .filter(function(obj) {
+        return obj.attribute === 'cname';
+      })[0];
+  if (remoteSsrc) {
+    rtcpParameters.cname = remoteSsrc.value;
+    rtcpParameters.ssrc = remoteSsrc.ssrc;
+  }
+
+  // Edge uses the compound attribute instead of reducedSize
+  // compound is !reducedSize
+  var rsize = SDPUtils.matchPrefix(mediaSection, 'a=rtcp-rsize');
+  rtcpParameters.reducedSize = rsize.length > 0;
+  rtcpParameters.compound = rsize.length === 0;
+
+  // parses the rtcp-mux attrіbute.
+  // Note that Edge does not support unmuxed RTCP.
+  var mux = SDPUtils.matchPrefix(mediaSection, 'a=rtcp-mux');
+  rtcpParameters.mux = mux.length > 0;
+
+  return rtcpParameters;
+};
+
+// parses either a=msid: or a=ssrc:... msid lines an returns
+// the id of the MediaStream and MediaStreamTrack.
+SDPUtils.parseMsid = function(mediaSection) {
+  var parts;
+  var spec = SDPUtils.matchPrefix(mediaSection, 'a=msid:');
+  if (spec.length === 1) {
+    parts = spec[0].substr(7).split(' ');
+    return {stream: parts[0], track: parts[1]};
+  }
+  var planB = SDPUtils.matchPrefix(mediaSection, 'a=ssrc:')
+  .map(function(line) {
+    return SDPUtils.parseSsrcMedia(line);
+  })
+  .filter(function(parts) {
+    return parts.attribute === 'msid';
+  });
+  if (planB.length > 0) {
+    parts = planB[0].value.split(' ');
+    return {stream: parts[0], track: parts[1]};
+  }
+};
+
 SDPUtils.writeSessionBoilerplate = function() {
   // FIXME: sess-id should be an NTP timestamp.
   return 'v=0\r\n' +
@@ -457,17 +521,31 @@ SDPUtils.writeMediaSection = function(transceiver, caps, type, stream) {
     sdp += 'a=inactive\r\n';
   }
 
-  // FIXME: for RTX there might be multiple SSRCs. Not implemented in Edge yet.
   if (transceiver.rtpSender) {
+    // spec.
     var msid = 'msid:' + stream.id + ' ' +
         transceiver.rtpSender.track.id + '\r\n';
     sdp += 'a=' + msid;
+
+    // for Chrome.
     sdp += 'a=ssrc:' + transceiver.sendEncodingParameters[0].ssrc +
         ' ' + msid;
+    if (transceiver.sendEncodingParameters[0].rtx) {
+      sdp += 'a=ssrc:' + transceiver.sendEncodingParameters[0].rtx.ssrc +
+          ' ' + msid;
+      sdp += 'a=ssrc-group:FID ' +
+          transceiver.sendEncodingParameters[0].ssrc + ' ' +
+          transceiver.sendEncodingParameters[0].rtx.ssrc +
+          '\r\n';
+    }
   }
   // FIXME: this should be written by writeRtpDescription.
   sdp += 'a=ssrc:' + transceiver.sendEncodingParameters[0].ssrc +
       ' cname:' + SDPUtils.localCName + '\r\n';
+  if (transceiver.rtpSender && transceiver.sendEncodingParameters[0].rtx) {
+    sdp += 'a=ssrc:' + transceiver.sendEncodingParameters[0].rtx.ssrc +
+        ' cname:' + SDPUtils.localCName + '\r\n';
+  }
   return sdp;
 };
 
@@ -490,6 +568,16 @@ SDPUtils.getDirection = function(mediaSection, sessionpart) {
     return SDPUtils.getDirection(sessionpart);
   }
   return 'sendrecv';
+};
+
+SDPUtils.getKind = function(mediaSection) {
+  var lines = SDPUtils.splitLines(mediaSection);
+  var mline = lines[0].split(' ');
+  return mline[0].substr(2);
+};
+
+SDPUtils.isRejected = function(mediaSection) {
+  return mediaSection.split(' ', 2)[1] === '0';
 };
 
 // Expose public methods.
@@ -576,6 +664,7 @@ module.exports = SDPUtils;
       edgeShim.shimGetUserMedia();
       utils.shimCreateObjectURL();
       edgeShim.shimPeerConnection();
+      edgeShim.shimReplaceTrack();
       break;
     case 'safari':
       if (!safariShim) {
@@ -586,6 +675,7 @@ module.exports = SDPUtils;
       // Export to the adapter global object visible in the browser.
       module.exports.browserShim = safariShim;
 
+      safariShim.shimOnAddStream();
       safariShim.shimGetUserMedia();
       break;
     default:
@@ -761,6 +851,35 @@ var chromeShim = {
           }
         });
       }
+    } else {
+      // migrate from non-spec RTCIceServer.url to RTCIceServer.urls
+      var OrigPeerConnection = RTCPeerConnection;
+      window.RTCPeerConnection = function(pcConfig, pcConstraints) {
+        if (pcConfig && pcConfig.iceServers) {
+          var newIceServers = [];
+          for (var i = 0; i < pcConfig.iceServers.length; i++) {
+            var server = pcConfig.iceServers[i];
+            if (!server.hasOwnProperty('urls') &&
+                server.hasOwnProperty('url')) {
+              console.warn('RTCIceServer.url is deprecated! Use urls instead.');
+              server = JSON.parse(JSON.stringify(server));
+              server.urls = server.url;
+              newIceServers.push(server);
+            } else {
+              newIceServers.push(pcConfig.iceServers[i]);
+            }
+          }
+          pcConfig.iceServers = newIceServers;
+        }
+        return new OrigPeerConnection(pcConfig, pcConstraints);
+      };
+      window.RTCPeerConnection.prototype = OrigPeerConnection.prototype;
+      // wrap static methods. Currently just generateCertificate.
+      Object.defineProperty(window.RTCPeerConnection, 'generateCertificate', {
+        get: function() {
+          return OrigPeerConnection.generateCertificate;
+        }
+      });
     }
 
     var origGetStats = RTCPeerConnection.prototype.getStats;
@@ -921,6 +1040,7 @@ module.exports = {
  /* eslint-env node */
 'use strict';
 var logging = require('../utils.js').log;
+var browserDetails = require('../utils.js').browserDetails;
 
 // Expose public methods.
 module.exports = function() {
@@ -981,28 +1101,36 @@ module.exports = function() {
       constraints.audio = constraintsToChrome_(constraints.audio);
     }
     if (constraints && typeof constraints.video === 'object') {
-      // Shim facingMode for mobile, where it defaults to "user".
+      // Shim facingMode for mobile & surface pro.
       var face = constraints.video.facingMode;
       face = face && ((typeof face === 'object') ? face : {ideal: face});
+      var getSupportedFacingModeLies = browserDetails.version < 61;
 
       if ((face && (face.exact === 'user' || face.exact === 'environment' ||
                     face.ideal === 'user' || face.ideal === 'environment')) &&
           !(navigator.mediaDevices.getSupportedConstraints &&
-            navigator.mediaDevices.getSupportedConstraints().facingMode)) {
+            navigator.mediaDevices.getSupportedConstraints().facingMode &&
+            !getSupportedFacingModeLies)) {
         delete constraints.video.facingMode;
+        var match;
         if (face.exact === 'environment' || face.ideal === 'environment') {
-          // Look for "back" in label, or use last cam (typically back cam).
+          match = 'back';
+        } else if (face.exact === 'user' || face.ideal === 'user') {
+          match = 'front';
+        }
+        if (match) {
+          // Look for match in label.
           return navigator.mediaDevices.enumerateDevices()
           .then(function(devices) {
             devices = devices.filter(function(d) {
               return d.kind === 'videoinput';
             });
-            var back = devices.find(function(d) {
-              return d.label.toLowerCase().indexOf('back') !== -1;
-            }) || (devices.length && devices[devices.length - 1]);
-            if (back) {
-              constraints.video.deviceId = face.exact ? {exact: back.deviceId} :
-                                                        {ideal: back.deviceId};
+            var dev = devices.find(function(d) {
+              return d.label.toLowerCase().indexOf(match) !== -1;
+            });
+            if (dev) {
+              constraints.video.deviceId = face.exact ? {exact: dev.deviceId} :
+                                                        {ideal: dev.deviceId};
             }
             constraints.video = constraintsToChrome_(constraints.video);
             logging('chrome: ' + JSON.stringify(constraints));
@@ -1062,6 +1190,12 @@ module.exports = function() {
             }));
           });
         });
+      },
+      getSupportedConstraints: function() {
+        return {
+          deviceId: true, echoCancellation: true, facingMode: true,
+          frameRate: true, height: true, width: true
+        };
       }
     };
   }
@@ -1124,6 +1258,67 @@ module.exports = function() {
 var SDPUtils = require('sdp');
 var browserDetails = require('../utils').browserDetails;
 
+// sort tracks such that they follow an a-v-a-v...
+// pattern.
+function sortTracks(tracks) {
+  var audioTracks = tracks.filter(function(track) {
+    return track.kind === 'audio';
+  });
+  var videoTracks = tracks.filter(function(track) {
+    return track.kind === 'video';
+  });
+  tracks = [];
+  while (audioTracks.length || videoTracks.length) {
+    if (audioTracks.length) {
+      tracks.push(audioTracks.shift());
+    }
+    if (videoTracks.length) {
+      tracks.push(videoTracks.shift());
+    }
+  }
+  return tracks;
+}
+
+// Edge does not like
+// 1) stun:
+// 2) turn: that does not have all of turn:host:port?transport=udp
+// 3) turn: with ipv6 addresses
+// 4) turn: occurring muliple times
+function filterIceServers(iceServers) {
+  var hasTurn = false;
+  iceServers = JSON.parse(JSON.stringify(iceServers));
+  return iceServers.filter(function(server) {
+    if (server && (server.urls || server.url)) {
+      var urls = server.urls || server.url;
+      if (server.url && !server.urls) {
+        console.warn('RTCIceServer.url is deprecated! Use urls instead.');
+      }
+      var isString = typeof urls === 'string';
+      if (isString) {
+        urls = [urls];
+      }
+      urls = urls.filter(function(url) {
+        var validTurn = url.indexOf('turn:') === 0 &&
+            url.indexOf('transport=udp') !== -1 &&
+            url.indexOf('turn:[') === -1 &&
+            !hasTurn;
+
+        if (validTurn) {
+          hasTurn = true;
+          return true;
+        }
+        return url.indexOf('stun:') === 0 &&
+            browserDetails.version >= 14393;
+      });
+
+      delete server.url;
+      server.urls = isString ? urls[0] : urls;
+      return !!urls.length;
+    }
+    return false;
+  });
+}
+
 var edgeShim = {
   shimPeerConnection: function() {
     if (window.RTCIceGatherer) {
@@ -1177,6 +1372,7 @@ var edgeShim = {
       this.onicegatheringstatechange = null;
       this.onnegotiationneeded = null;
       this.ondatachannel = null;
+      this.canTrickleIceCandidates = null;
 
       this.localStreams = [];
       this.remoteStreams = [];
@@ -1209,9 +1405,6 @@ var edgeShim = {
           case 'relay':
             this.iceOptions.gatherPolicy = config.iceTransportPolicy;
             break;
-          case 'none':
-            // FIXME: remove once implementation and spec have added this.
-            throw new TypeError('iceTransportPolicy "none" not supported');
           default:
             // don't set iceTransportPolicy.
             break;
@@ -1220,30 +1413,9 @@ var edgeShim = {
       this.usingBundle = config && config.bundlePolicy === 'max-bundle';
 
       if (config && config.iceServers) {
-        // Edge does not like
-        // 1) stun:
-        // 2) turn: that does not have all of turn:host:port?transport=udp
-        // 3) turn: with ipv6 addresses
-        var iceServers = JSON.parse(JSON.stringify(config.iceServers));
-        this.iceOptions.iceServers = iceServers.filter(function(server) {
-          if (server && server.urls) {
-            var urls = server.urls;
-            if (typeof urls === 'string') {
-              urls = [urls];
-            }
-            urls = urls.filter(function(url) {
-              return (url.indexOf('turn:') === 0 &&
-                  url.indexOf('transport=udp') !== -1 &&
-                  url.indexOf('turn:[') === -1) ||
-                  (url.indexOf('stun:') === 0 &&
-                    browserDetails.version >= 14393);
-            })[0];
-            return !!urls;
-          }
-          return false;
-        });
+        this.iceOptions.iceServers = filterIceServers(config.iceServers);
       }
-      this._config = config;
+      this._config = config || {};
 
       // per-track iceGathers, iceTransports, dtlsTransports, rtpSenders, ...
       // everything that is needed to describe a SDP m-line.
@@ -1356,11 +1528,39 @@ var edgeShim = {
             headerExtensions: [],
             fecMechanisms: []
           };
+
+          var findCodecByPayloadType = function(pt, codecs) {
+            pt = parseInt(pt, 10);
+            for (var i = 0; i < codecs.length; i++) {
+              if (codecs[i].payloadType === pt ||
+                  codecs[i].preferredPayloadType === pt) {
+                return codecs[i];
+              }
+            }
+          };
+
+          var rtxCapabilityMatches = function(lRtx, rRtx, lCodecs, rCodecs) {
+            var lCodec = findCodecByPayloadType(lRtx.parameters.apt, lCodecs);
+            var rCodec = findCodecByPayloadType(rRtx.parameters.apt, rCodecs);
+            return lCodec && rCodec &&
+                lCodec.name.toLowerCase() === rCodec.name.toLowerCase();
+          };
+
           localCapabilities.codecs.forEach(function(lCodec) {
             for (var i = 0; i < remoteCapabilities.codecs.length; i++) {
               var rCodec = remoteCapabilities.codecs[i];
               if (lCodec.name.toLowerCase() === rCodec.name.toLowerCase() &&
                   lCodec.clockRate === rCodec.clockRate) {
+                if (lCodec.name.toLowerCase() === 'rtx' &&
+                    lCodec.parameters && rCodec.parameters.apt) {
+                  // for RTX we need to find the local rtx that has a apt
+                  // which points to the same local codec as the remote one.
+                  if (!rtxCapabilityMatches(lCodec, rCodec,
+                      localCapabilities.codecs, remoteCapabilities.codecs)) {
+                    continue;
+                  }
+                }
+                rCodec = JSON.parse(JSON.stringify(rCodec)); // deepcopy
                 // number of channels is the highest common number of channels
                 rCodec.numChannels = Math.min(lCodec.numChannels,
                     rCodec.numChannels);
@@ -1499,6 +1699,29 @@ var edgeShim = {
           };
         };
 
+    // Destroy ICE gatherer, ICE transport and DTLS transport.
+    // Without triggering the callbacks.
+    window.RTCPeerConnection.prototype._disposeIceAndDtlsTransports =
+        function(sdpMLineIndex) {
+          var iceGatherer = this.transceivers[sdpMLineIndex].iceGatherer;
+          if (iceGatherer) {
+            delete iceGatherer.onlocalcandidate;
+            delete this.transceivers[sdpMLineIndex].iceGatherer;
+          }
+          var iceTransport = this.transceivers[sdpMLineIndex].iceTransport;
+          if (iceTransport) {
+            delete iceTransport.onicestatechange;
+            delete this.transceivers[sdpMLineIndex].iceTransport;
+          }
+          var dtlsTransport = this.transceivers[sdpMLineIndex].dtlsTransport;
+          if (dtlsTransport) {
+            delete dtlsTransport.ondtlssttatechange;
+            delete dtlsTransport.onerror;
+            delete this.transceivers[sdpMLineIndex].dtlsTransport;
+          }
+        };
+
+
     // Start the RTP Sender and Receiver for a transceiver.
     window.RTCPeerConnection.prototype._transceive = function(transceiver,
         send, recv) {
@@ -1507,7 +1730,8 @@ var edgeShim = {
       if (send && transceiver.rtpSender) {
         params.encodings = transceiver.sendEncodingParameters;
         params.rtcp = {
-          cname: SDPUtils.localCName
+          cname: SDPUtils.localCName,
+          compound: transceiver.rtcpParameters.compound
         };
         if (transceiver.recvEncodingParameters.length) {
           params.rtcp.ssrc = transceiver.recvEncodingParameters[0].ssrc;
@@ -1517,14 +1741,16 @@ var edgeShim = {
       if (recv && transceiver.rtpReceiver) {
         // remove RTX field in Edge 14942
         if (transceiver.kind === 'video'
-            && transceiver.recvEncodingParameters) {
+            && transceiver.recvEncodingParameters
+            && browserDetails.version < 15019) {
           transceiver.recvEncodingParameters.forEach(function(p) {
             delete p.rtx;
           });
         }
         params.encodings = transceiver.recvEncodingParameters;
         params.rtcp = {
-          cname: transceiver.cname
+          cname: transceiver.rtcpParameters.cname,
+          compound: transceiver.rtcpParameters.compound
         };
         if (transceiver.sendEncodingParameters.length) {
           params.rtcp.ssrc = transceiver.sendEncodingParameters[0].ssrc;
@@ -1625,6 +1851,7 @@ var edgeShim = {
               cb();
               if (self.iceGatheringState === 'new') {
                 self.iceGatheringState = 'gathering';
+                self._emitGatheringStateChange();
               }
               self._emitBufferedCandidates();
             }, 0);
@@ -1634,6 +1861,7 @@ var edgeShim = {
             if (!hasCallback) {
               if (self.iceGatheringState === 'new') {
                 self.iceGatheringState = 'gathering';
+                self._emitGatheringStateChange();
               }
               // Usually candidates will be emitted earlier.
               window.setTimeout(self._emitBufferedCandidates.bind(self), 500);
@@ -1645,20 +1873,30 @@ var edgeShim = {
     window.RTCPeerConnection.prototype.setRemoteDescription =
         function(description) {
           var self = this;
-          var stream = new MediaStream();
+          var streams = {};
           var receiverList = [];
           var sections = SDPUtils.splitSections(description.sdp);
           var sessionpart = sections.shift();
           var isIceLite = SDPUtils.matchPrefix(sessionpart,
               'a=ice-lite').length > 0;
-          this.usingBundle = SDPUtils.matchPrefix(sessionpart,
+          var usingBundle = SDPUtils.matchPrefix(sessionpart,
               'a=group:BUNDLE ').length > 0;
+          var iceOptions = SDPUtils.matchPrefix(sessionpart,
+              'a=ice-options:')[0];
+          if (iceOptions) {
+            this.canTrickleIceCandidates = iceOptions.substr(14).split(' ')
+                .indexOf('trickle') >= 0;
+          } else {
+            this.canTrickleIceCandidates = false;
+          }
+
           sections.forEach(function(mediaSection, sdpMLineIndex) {
             var lines = SDPUtils.splitLines(mediaSection);
             var mline = lines[0].substr(2).split(' ');
             var kind = mline[0];
             var rejected = mline[1] === '0';
             var direction = SDPUtils.getDirection(mediaSection, sessionpart);
+            var remoteMsid = SDPUtils.parseMsid(mediaSection);
 
             var mid = SDPUtils.matchPrefix(mediaSection, 'a=mid:');
             if (mid.length) {
@@ -1701,19 +1939,7 @@ var edgeShim = {
             recvEncodingParameters =
                 SDPUtils.parseRtpEncodingParameters(mediaSection);
 
-            var cname;
-            // Gets the first SSRC. Note that with RTX there might be multiple
-            // SSRCs.
-            var remoteSsrc = SDPUtils.matchPrefix(mediaSection, 'a=ssrc:')
-                .map(function(line) {
-                  return SDPUtils.parseSsrcMedia(line);
-                })
-                .filter(function(obj) {
-                  return obj.attribute === 'cname';
-                })[0];
-            if (remoteSsrc) {
-              cname = remoteSsrc.value;
-            }
+            var rtcpParameters = SDPUtils.parseRtcpParameters(mediaSection);
 
             var isComplete = SDPUtils.matchPrefix(mediaSection,
                 'a=end-of-candidates', sessionpart).length > 0;
@@ -1725,13 +1951,13 @@ var edgeShim = {
                   return cand.component === '1';
                 });
             if (description.type === 'offer' && !rejected) {
-              var transports = self.usingBundle && sdpMLineIndex > 0 ? {
+              var transports = usingBundle && sdpMLineIndex > 0 ? {
                 iceGatherer: self.transceivers[0].iceGatherer,
                 iceTransport: self.transceivers[0].iceTransport,
                 dtlsTransport: self.transceivers[0].dtlsTransport
               } : self._createIceAndDtlsTransports(mid, sdpMLineIndex);
 
-              if (isComplete && (!self.usingBundle || sdpMLineIndex === 0)) {
+              if (isComplete && (!usingBundle || sdpMLineIndex === 0)) {
                 transports.iceTransport.setRemoteCandidates(cands);
               }
 
@@ -1739,22 +1965,48 @@ var edgeShim = {
 
               // filter RTX until additional stuff needed for RTX is implemented
               // in adapter.js
-              localCapabilities.codecs = localCapabilities.codecs.filter(
-                  function(codec) {
-                    return codec.name !== 'rtx';
-                  });
+              if (browserDetails.version < 15019) {
+                localCapabilities.codecs = localCapabilities.codecs.filter(
+                    function(codec) {
+                      return codec.name !== 'rtx';
+                    });
+              }
 
               sendEncodingParameters = [{
                 ssrc: (2 * sdpMLineIndex + 2) * 1001
               }];
 
-              rtpReceiver = new RTCRtpReceiver(transports.dtlsTransport, kind);
+              if (direction === 'sendrecv' || direction === 'sendonly') {
+                rtpReceiver = new RTCRtpReceiver(transports.dtlsTransport,
+                    kind);
 
-              track = rtpReceiver.track;
-              receiverList.push([track, rtpReceiver]);
-              // FIXME: not correct when there are multiple streams but that is
-              // not currently supported in this shim.
-              stream.addTrack(track);
+                track = rtpReceiver.track;
+                // FIXME: does not work with Plan B.
+                if (remoteMsid) {
+                  if (!streams[remoteMsid.stream]) {
+                    streams[remoteMsid.stream] = new MediaStream();
+                    Object.defineProperty(streams[remoteMsid.stream], 'id', {
+                      get: function() {
+                        return remoteMsid.stream;
+                      }
+                    });
+                  }
+                  Object.defineProperty(track, 'id', {
+                    get: function() {
+                      return remoteMsid.track;
+                    }
+                  });
+                  streams[remoteMsid.stream].addTrack(track);
+                  receiverList.push([track, rtpReceiver,
+                      streams[remoteMsid.stream]]);
+                } else {
+                  if (!streams.default) {
+                    streams.default = new MediaStream();
+                  }
+                  streams.default.addTrack(track);
+                  receiverList.push([track, rtpReceiver, streams.default]);
+                }
+              }
 
               // FIXME: look at direction.
               if (self.localStreams.length > 0 &&
@@ -1766,6 +2018,12 @@ var edgeShim = {
                   localTrack = self.localStreams[0].getVideoTracks()[0];
                 }
                 if (localTrack) {
+                  // add RTX
+                  if (browserDetails.version >= 15019 && kind === 'video') {
+                    sendEncodingParameters[0].rtx = {
+                      ssrc: (2 * sdpMLineIndex + 2) * 1001 + 1
+                    };
+                  }
                   rtpSender = new RTCRtpSender(localTrack,
                       transports.dtlsTransport);
                 }
@@ -1781,7 +2039,7 @@ var edgeShim = {
                 rtpReceiver: rtpReceiver,
                 kind: kind,
                 mid: mid,
-                cname: cname,
+                rtcpParameters: rtcpParameters,
                 sendEncodingParameters: sendEncodingParameters,
                 recvEncodingParameters: recvEncodingParameters
               };
@@ -1791,6 +2049,15 @@ var edgeShim = {
                   false,
                   direction === 'sendrecv' || direction === 'sendonly');
             } else if (description.type === 'answer' && !rejected) {
+              if (usingBundle && sdpMLineIndex > 0) {
+                self._disposeIceAndDtlsTransports(sdpMLineIndex);
+                self.transceivers[sdpMLineIndex].iceGatherer =
+                    self.transceivers[0].iceGatherer;
+                self.transceivers[sdpMLineIndex].iceTransport =
+                    self.transceivers[0].iceTransport;
+                self.transceivers[sdpMLineIndex].dtlsTransport =
+                    self.transceivers[0].dtlsTransport;
+              }
               transceiver = self.transceivers[sdpMLineIndex];
               iceGatherer = transceiver.iceGatherer;
               iceTransport = transceiver.iceTransport;
@@ -1804,12 +2071,12 @@ var edgeShim = {
                   recvEncodingParameters;
               self.transceivers[sdpMLineIndex].remoteCapabilities =
                   remoteCapabilities;
-              self.transceivers[sdpMLineIndex].cname = cname;
+              self.transceivers[sdpMLineIndex].rtcpParameters = rtcpParameters;
 
               if ((isIceLite || isComplete) && cands.length) {
                 iceTransport.setRemoteCandidates(cands);
               }
-              if (!self.usingBundle || sdpMLineIndex === 0) {
+              if (!usingBundle || sdpMLineIndex === 0) {
                 iceTransport.start(iceGatherer, remoteIceParameters,
                     'controlling');
                 dtlsTransport.start(remoteDtlsParameters);
@@ -1823,13 +2090,24 @@ var edgeShim = {
                   (direction === 'sendrecv' || direction === 'sendonly')) {
                 track = rtpReceiver.track;
                 receiverList.push([track, rtpReceiver]);
-                stream.addTrack(track);
+                if (remoteMsid) {
+                  if (!streams[remoteMsid.stream]) {
+                    streams[remoteMsid.stream] = new MediaStream();
+                  }
+                  streams[remoteMsid.stream].addTrack(track);
+                } else {
+                  if (!streams.default) {
+                    streams.default = new MediaStream();
+                  }
+                  streams.default.addTrack(track);
+                }
               } else {
                 // FIXME: actually the receiver should be created later.
                 delete transceiver.rtpReceiver;
               }
             }
           });
+          this.usingBundle = usingBundle;
 
           this.remoteDescription = {
             type: description.type,
@@ -1846,9 +2124,10 @@ var edgeShim = {
               throw new TypeError('unsupported type "' + description.type +
                   '"');
           }
-          if (stream.getTracks().length) {
-            self.remoteStreams.push(stream);
-            window.setTimeout(function() {
+          Object.keys(streams).forEach(function(sid) {
+            var stream = streams[sid];
+            if (stream.getTracks().length) {
+              self.remoteStreams.push(stream);
               var event = new Event('addstream');
               event.stream = stream;
               self.dispatchEvent(event);
@@ -1861,6 +2140,9 @@ var edgeShim = {
               receiverList.forEach(function(item) {
                 var track = item[0];
                 var receiver = item[1];
+                if (stream.id !== item[2].id) {
+                  return;
+                }
                 var trackEvent = new Event('track');
                 trackEvent.track = track;
                 trackEvent.receiver = receiver;
@@ -1872,8 +2154,8 @@ var edgeShim = {
                   }, 0);
                 }
               });
-            }, 0);
-          }
+            }
+          });
           if (arguments.length > 1 && typeof arguments[1] === 'function') {
             window.setTimeout(arguments[1], 0);
           }
@@ -1986,8 +2268,12 @@ var edgeShim = {
       var numVideoTracks = 0;
       // Default to sendrecv.
       if (this.localStreams.length) {
-        numAudioTracks = this.localStreams[0].getAudioTracks().length;
-        numVideoTracks = this.localStreams[0].getVideoTracks().length;
+        numAudioTracks = this.localStreams.reduce(function(numTracks, stream) {
+          return numTracks + stream.getAudioTracks().length;
+        }, 0);
+        numVideoTracks = this.localStreams.reduce(function(numTracks, stream) {
+          return numTracks + stream.getVideoTracks().length;
+        }, 0);
       }
       // Determine number of audio and video tracks we need to send/recv.
       if (offerOptions) {
@@ -2003,12 +2289,14 @@ var edgeShim = {
           numVideoTracks = offerOptions.offerToReceiveVideo;
         }
       }
-      if (this.localStreams.length) {
-        // Push local streams.
-        this.localStreams[0].getTracks().forEach(function(track) {
+
+      // Push local streams.
+      this.localStreams.forEach(function(localStream) {
+        localStream.getTracks().forEach(function(track) {
           tracks.push({
             kind: track.kind,
             track: track,
+            stream: localStream,
             wantReceive: track.kind === 'audio' ?
                 numAudioTracks > 0 : numVideoTracks > 0
           });
@@ -2018,7 +2306,8 @@ var edgeShim = {
             numVideoTracks--;
           }
         });
-      }
+      });
+
       // Create M-lines for recvonly streams.
       while (numAudioTracks > 0 || numVideoTracks > 0) {
         if (numAudioTracks > 0) {
@@ -2036,6 +2325,8 @@ var edgeShim = {
           numVideoTracks--;
         }
       }
+      // reorder tracks
+      tracks = sortTracks(tracks);
 
       var sdp = SDPUtils.writeSessionBoilerplate();
       var transceivers = [];
@@ -2055,10 +2346,12 @@ var edgeShim = {
         var localCapabilities = RTCRtpSender.getCapabilities(kind);
         // filter RTX until additional stuff needed for RTX is implemented
         // in adapter.js
-        localCapabilities.codecs = localCapabilities.codecs.filter(
-            function(codec) {
-              return codec.name !== 'rtx';
-            });
+        if (browserDetails.version < 15019) {
+          localCapabilities.codecs = localCapabilities.codecs.filter(
+              function(codec) {
+                return codec.name !== 'rtx';
+              });
+        }
         localCapabilities.codecs.forEach(function(codec) {
           // work around https://bugs.chromium.org/p/webrtc/issues/detail?id=6552
           // by adding level-asymmetry-allowed=1
@@ -2076,6 +2369,12 @@ var edgeShim = {
           ssrc: (2 * sdpMLineIndex + 1) * 1001
         }];
         if (track) {
+          // add RTX
+          if (browserDetails.version >= 15019 && kind === 'video') {
+            sendEncodingParameters[0].rtx = {
+              ssrc: (2 * sdpMLineIndex + 1) * 1001 + 1
+            };
+          }
           rtpSender = new RTCRtpSender(track, transports.dtlsTransport);
         }
 
@@ -2097,15 +2396,20 @@ var edgeShim = {
           recvEncodingParameters: null
         };
       });
-      if (this.usingBundle) {
+
+      // always offer BUNDLE and dispose on return if not supported.
+      if (this._config.bundlePolicy !== 'max-compat') {
         sdp += 'a=group:BUNDLE ' + transceivers.map(function(t) {
           return t.mid;
         }).join(' ') + '\r\n';
       }
+      sdp += 'a=ice-options:trickle\r\n';
+
       tracks.forEach(function(mline, sdpMLineIndex) {
         var transceiver = transceivers[sdpMLineIndex];
         sdp += SDPUtils.writeMediaSection(transceiver,
-            transceiver.localCapabilities, 'offer', self.localStreams[0]);
+            transceiver.localCapabilities, 'offer', mline.stream);
+        sdp += 'a=rtcp-rsize\r\n';
       });
 
       this._pendingOffer = transceivers;
@@ -2140,8 +2444,19 @@ var edgeShim = {
             transceiver.localCapabilities,
             transceiver.remoteCapabilities);
 
+        var hasRtx = commonCapabilities.codecs.filter(function(c) {
+          return c.name.toLowerCase() === 'rtx';
+        }).length;
+        if (!hasRtx && transceiver.sendEncodingParameters[0].rtx) {
+          delete transceiver.sendEncodingParameters[0].rtx;
+        }
+
         sdp += SDPUtils.writeMediaSection(transceiver, commonCapabilities,
             'answer', self.localStreams[0]);
+        if (transceiver.rtcpParameters &&
+            transceiver.rtcpParameters.reducedSize) {
+          sdp += 'a=rtcp-rsize\r\n';
+        }
       });
 
       var desc = new RTCSessionDescription({
@@ -2212,14 +2527,13 @@ var edgeShim = {
       var cb = arguments.length > 1 && typeof arguments[1] === 'function' &&
           arguments[1];
       var fixStatsType = function(stat) {
-        stat.type = {
+        return {
           inboundrtp: 'inbound-rtp',
           outboundrtp: 'outbound-rtp',
           candidatepair: 'candidate-pair',
           localcandidate: 'local-candidate',
           remotecandidate: 'remote-candidate'
         }[stat.type] || stat.type;
-        return stat;
       };
       return new Promise(function(resolve) {
         // shim getStats with maplike support
@@ -2238,13 +2552,20 @@ var edgeShim = {
         });
       });
     };
+  },
+  shimReplaceTrack: function() {
+    // ORTC has replaceTrack -- https://github.com/w3c/ortc/issues/614
+    if (window.RTCRtpSender && !('replaceTrack' in RTCRtpSender.prototype)) {
+      RTCRtpSender.prototype.replaceTrack = RTCRtpSender.prototype.setTrack;
+    }
   }
 };
 
 // Expose public methods.
 module.exports = {
   shimPeerConnection: edgeShim.shimPeerConnection,
-  shimGetUserMedia: require('./getusermedia')
+  shimGetUserMedia: require('./getusermedia'),
+  shimReplaceTrack: edgeShim.shimReplaceTrack
 };
 
 },{"../utils":10,"./getusermedia":6,"sdp":1}],6:[function(require,module,exports){
@@ -2492,6 +2813,7 @@ module.exports = function() {
   var shimError_ = function(e) {
     return {
       name: {
+        NotSupportedError: 'TypeError',
         SecurityError: 'NotAllowedError',
         PermissionDeniedError: 'NotAllowedError'
       }[e.name] || e.name,
@@ -2647,11 +2969,41 @@ module.exports = function() {
 'use strict';
 var safariShim = {
   // TODO: DrAlex, should be here, double check against LayoutTests
-  // shimOnTrack: function() { },
 
   // TODO: once the back-end for the mac port is done, add.
   // TODO: check for webkitGTK+
   // shimPeerConnection: function() { },
+
+  shimOnAddStream: function() {
+    if (typeof window === 'object' && window.RTCPeerConnection &&
+        !('onaddstream' in window.RTCPeerConnection.prototype)) {
+      Object.defineProperty(window.RTCPeerConnection.prototype, 'onaddstream', {
+        get: function() {
+          return this._onaddstream;
+        },
+        set: function(f) {
+          if (this._onaddstream) {
+            this.removeEventListener('addstream', this._onaddstream);
+            this.removeEventListener('track', this._onaddstreampoly);
+          }
+          this.addEventListener('addstream', this._onaddstream = f);
+          this.addEventListener('track', this._onaddstreampoly = function(e) {
+            var stream = e.streams[0];
+            if (!this._streams) {
+              this._streams = [];
+            }
+            if (this._streams.indexOf(stream) >= 0) {
+              return;
+            }
+            this._streams.push(stream);
+            var event = new Event('addstream');
+            event.stream = e.streams[0];
+            this.dispatchEvent(event);
+          }.bind(this));
+        }
+      });
+    }
+  },
 
   shimGetUserMedia: function() {
     if (!navigator.getUserMedia) {
@@ -2670,9 +3022,9 @@ var safariShim = {
 
 // Expose public methods.
 module.exports = {
+  shimOnAddStream: safariShim.shimOnAddStream,
   shimGetUserMedia: safariShim.shimGetUserMedia
   // TODO
-  // shimOnTrack: safariShim.shimOnTrack,
   // shimPeerConnection: safariShim.shimPeerConnection
 };
 

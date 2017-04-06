@@ -17,29 +17,6 @@ var webdriver = require('selenium-webdriver');
 var seleniumHelpers = require('./selenium-lib');
 
 // Start of tests.
-
-// Due to loading adapter.js as a module, there is no need to use webdriver for
-// this test (note that this uses Node.js's require import function).
-test('Log suppression', function(t) {
-  // Define test
-  var logCount = 0;
-  var saveConsole = console.log.bind(console);
-  console.log = function() {
-    logCount++;
-    saveConsole.apply(saveConsole, arguments);
-  };
-  var adapter = require('../out/adapter.js');
-  var utils = require('../src/js/utils.js');
-
-  utils.log('test');
-  console.log = saveConsole;
-
-  // Run test.
-  t.ok(adapter, 'adapter.js loaded as a module');
-  t.ok(logCount === 0, 'adapter.js does not use console.log');
-  t.end();
-});
-
 test('Browser identified', function(t) {
   var driver = seleniumHelpers.buildDriver();
 
@@ -1512,7 +1489,20 @@ test('dtmf', t => {
         return new Promise(resolve => sender.dtmf.ontonechange = resolve);
       })
       .then(e => {
-        pc1.removeStream(stream);
+        // Test getSenders Chrome polyfill
+        try {
+          // FF51+ doesn't have removeStream
+          if (!('removeStream' in pc1)) {
+            throw new DOMException('', 'NotSupportedError');
+          }
+          // Avoid <FF51 throwing NotSupportedError - https://bugzil.la/1213441
+          pc1.removeStream(stream);
+        } catch (err) {
+          if (err.name !== 'NotSupportedError') {
+            throw err;
+          }
+          pc1.getSenders().forEach(sender => pc1.removeTrack(sender));
+        }
         stream.getTracks().forEach(track => {
           let sender = pc1.getSenders().find(s => s.track === track);
           if (sender) {
@@ -1659,7 +1649,7 @@ test('call enumerateDevices', function(t) {
 });
 
 // Test polyfill for getStats.
-test('getStats', function(t) {
+test('getStats', {skip: true}, function(t) {
   var driver = seleniumHelpers.buildDriver();
 
   var testDefinition = function() {
@@ -1999,7 +1989,9 @@ test('icegatheringstatechange event',
 
         var pc1 = new RTCPeerConnection();
         pc1.onicegatheringstatechange = function(event) {
-          callback(pc1.iceGatheringState);
+          if (pc1.iceGatheringState === 'complete') {
+            callback();
+          }
         };
 
         var constraints = {video: true, fake: true};
@@ -2017,9 +2009,8 @@ test('icegatheringstatechange event',
       .then(function() {
         return driver.executeAsyncScript(testDefinition);
       })
-      .then(function(iceGatheringState) {
-        t.ok(iceGatheringState === 'complete',
-            'gatheringstatechange fired and is \'complete\'');
+      .then(function() {
+        t.pass('gatheringstatechange fired and is \'complete\'');
         t.end();
       })
       .then(null, function(err) {
@@ -2093,29 +2084,30 @@ test('ontrack', function(t) {
         this.ok(false, msg);
       }
     };
-    var pc1 = new RTCPeerConnection(null);
-    var pc2 = new RTCPeerConnection(null);
+    var sdp = 'v=0\r\n' +
+        'o=- 166855176514521964 2 IN IP4 127.0.0.1\r\n' +
+        's=-\r\n' +
+        't=0 0\r\n' +
+        'a=msid-semantic:WMS *\r\n' +
+        'm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n' +
+        'c=IN IP4 0.0.0.0\r\n' +
+        'a=rtcp:9 IN IP4 0.0.0.0\r\n' +
+        'a=ice-ufrag:someufrag\r\n' +
+        'a=ice-pwd:somelongpwdwithenoughrandomness\r\n' +
+        'a=fingerprint:sha-256 8C:71:B3:8D:A5:38:FD:8F:A4:2E:A2:65:6C:86:52' +
+        ':BC:E0:6E:94:F2:9F:7C:4D:B5:DF:AF:AA:6F:44:90:8D:F4\r\n' +
+        'a=setup:actpass\r\n' +
+        'a=rtcp-mux\r\n' +
+        'a=mid:mid1\r\n' +
+        'a=sendonly\r\n' +
+        'a=rtpmap:111 opus/48000/2\r\n' +
+        'a=msid:stream1 track1\r\n' +
+        'a=ssrc:1001 cname:some\r\n';
 
-    pc1.oniceconnectionstatechange = function() {
-      if (pc1.iceConnectionState === 'connected' ||
-          pc1.iceConnectionState === 'completed') {
-        callback(pc1.iceConnectionState);
-      }
-    };
+    var pc = new RTCPeerConnection(null);
 
-    var addCandidate = function(pc, event) {
-      pc.addIceCandidate(event.candidate).catch(function(err) {
-        tc.fail('addIceCandidate ' + err.toString());
-      });
-    };
-    pc1.onicecandidate = function(event) {
-      addCandidate(pc2, event);
-    };
-    pc2.onicecandidate = function(event) {
-      addCandidate(pc1, event);
-    };
-    pc2.ontrack = function(e) {
-      tc.ok(true, 'pc2.ontrack called');
+    pc.ontrack = function(e) {
+      tc.ok(true, 'pc.ontrack called');
       tc.ok(typeof e.track === 'object', 'trackEvent.track is an object');
       tc.ok(typeof e.receiver === 'object',
           'trackEvent.receiver is object');
@@ -2124,39 +2116,24 @@ test('ontrack', function(t) {
       tc.ok(e.streams[0].getTracks().indexOf(e.track) !== -1,
           'trackEvent.track is in stream');
 
-      var receivers = pc2.getReceivers();
-      if (receivers && receivers.length) {
-        tc.ok(receivers.indexOf(e.receiver) !== -1,
-            'trackEvent.receiver matches a known receiver');
+      if (pc.getReceivers) {
+        var receivers = pc.getReceivers();
+        if (receivers && receivers.length) {
+          tc.ok(receivers.indexOf(e.receiver) !== -1,
+              'trackEvent.receiver matches a known receiver');
+        }
       }
+      callback({});
     };
 
-    var constraints = {video: true, fake: true};
-    navigator.mediaDevices.getUserMedia(constraints)
-    .then(function(stream) {
-      pc1.addStream(stream);
-      pc1.createOffer().then(function(offer) {
-        return pc1.setLocalDescription(offer);
-      }).then(function() {
-        return pc2.setRemoteDescription(pc1.localDescription);
-      }).then(function() {
-        return pc2.createAnswer();
-      }).then(function(answer) {
-        return pc2.setLocalDescription(answer);
-      }).then(function() {
-        return pc1.setRemoteDescription(pc2.localDescription);
-      }).then(function() {
-      }).catch(function(err) {
-        t.fail(err.toString());
-      });
-    })
+    pc.setRemoteDescription({type: 'offer', sdp: sdp})
     .catch(function(error) {
       callback(error);
     });
   };
 
-  // plan for 7 tests in Chrome (no getReceivers), 8 in FF and Edge.
-  t.plan(process.env.BROWSER === 'chrome' ? 7 : 8);
+  // plan for 6 tests in Chrome (no getReceivers), 7 in FF and Edge.
+  t.plan(process.env.BROWSER === 'chrome' ? 6 : 7);
   // Run test.
   seleniumHelpers.loadTestPage(driver)
   .then(function() {
@@ -2170,9 +2147,7 @@ test('ontrack', function(t) {
       return callback;
     }
   })
-  .then(function(pc1ConnectionStatus) {
-    t.ok(pc1ConnectionStatus === 'completed' || 'connected',
-      'P2P connection established');
+  .then(function() {
     return driver.executeScript('return window.testPassed');
   })
   .then(function(testPassed) {
