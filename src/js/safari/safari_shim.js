@@ -56,13 +56,28 @@ var safariShim = {
         }.bind(navigator);
       }
     }
+  },
+
+  // Attach a media stream to an element.
+  attachMediaStream: function(element, stream) {
+    /*if (browserDetails.version >= 43) {
+      element.srcObject = stream;
+    } else*/
+    if (typeof element.src !== 'undefined') {
+      element.src = URL.createObjectURL(stream);
+    } else {
+      logging('Error attaching stream to element.');
+    }
   }
+
 };
 
 // Expose public methods.
 module.exports = {
   shimOnAddStream: safariShim.shimOnAddStream,
-  shimGetUserMedia: safariShim.shimGetUserMedia
+  shimGetUserMedia: safariShim.shimGetUserMedia,
+  attachMediaStream: safariShim.attachMediaStream
+
   // TODO
   // shimPeerConnection: safariShim.shimPeerConnection
 };

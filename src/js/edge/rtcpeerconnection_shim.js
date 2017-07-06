@@ -1260,7 +1260,8 @@ module.exports = function(edgeVersion) {
       ['rtpSender', 'rtpReceiver', 'iceGatherer', 'iceTransport',
           'dtlsTransport'].forEach(function(method) {
             if (transceiver[method]) {
-              promises.push(transceiver[method].msGetStats());
+              //promises.push(transceiver[method].msGetStats());
+              promises.push(transceiver[method].getStats());
             }
           });
     });
@@ -1275,7 +1276,56 @@ module.exports = function(edgeVersion) {
         remotecandidate: 'remote-candidate'
       }[stat.type] || stat.type;
     };
-    var fixChromeStats_ = function(response) {
+    var fixFirefoxId = function(stat) {
+        //outbound_rtcp_video_1 / outbound_rtcp_audio_0 
+        //inbound_rtp_video_1  / inbound_rtp_audio_0
+        //outbound_rtp_video_1 / outbound_rtp_audio_0
+        //inbound_rtcp_video_1 / inbound_rtcp_audio_0
+        var id;
+
+        switch (stat.codecId) {
+          case "":
+          case undefined:
+            stat.mediaType = "NA";
+            break;
+          case "H264":
+          case "VP8":
+          case "VP9":
+          case "H264UC":
+            stat.mediaType = "video";
+            break;
+          default:
+            stat.mediaType = "audio";
+            break;
+        }
+
+        
+        switch (stat.type) {
+          case "outboundrtp":
+          case "outbound-rtp":
+            id = "outbound_rtp_" + stat.mediaType;
+            return id;
+
+          case "inboundrtp":
+          case "inbound-rtp":
+            id = "inbound_rtp_" + stat.mediaType;
+            return id;
+
+          case "track":
+            id = "track_" + stat.ssrcIds[0];
+           return id;
+
+          case "transport":
+            id = "transport_" + stat.id;
+           return id;
+
+          default:
+            id = stat.id;
+            return id;
+        }
+          
+    };
+    var fixEdgeStats_ = function(response) {
         var standardReport = {};
         var reports = response.result();
         reports.forEach(function(report) {
@@ -1295,7 +1345,47 @@ module.exports = function(edgeVersion) {
         return standardReport;
     };
     return new Promise(function(resolve) {
+            // shim getStats return Firefox-like support
+            var results = {};
+            
+            Promise.all(promises).then(function(res) {
+                    res.forEach(function(result) {
+                            Object.keys(result).forEach(function(id) {
+                                    result[id].type = fixStatsType(result[id]);
+                                    //Fill the blank features
+                                    if (result[id].type == "inbound-rtp" || result[id].type == "outbound-rtp") {
+                                      if (result[id].codecId == "") {
+                                        result[id].codecId = result[ result[id].associateStatsId ].codecId;
+                                      }
+                                    }
+
+                                    var sid = fixFirefoxId(result[id]);
+                                    results[sid] = result[id];
+                                    results[sid].id = sid;
+                                    
+                                    if (results[sid].id.match("video")) {
+                                      results[sid].mediaType = "video";
+                                      //Get Video track info
+                                      results[sid].frameWidth      = result[results[sid].mediaTrackId].frameWidth;
+                                      results[sid].frameHeight     = result[results[sid].mediaTrackId].frameHeight;
+                                      results[sid].framesPerSecond = result[results[sid].mediaTrackId].framesPerSecond;
+                                    } else if (results[sid].id.match("audio")) {
+                                      results[sid].mediaType = "audio";
+                                      //Get Audio track info
+                                      results[sid].audioLevel                = result[results[sid].mediaTrackId].audioLevel;
+                                      results[sid].echoReturnLoss            = result[results[sid].mediaTrackId].echoReturnLoss;
+                                      results[sid].echoReturnLossEnhancement = result[results[sid].mediaTrackId].echoReturnLossEnhancement;
+
+                                    }
+                                });
+                        });
+                    if (cb) {
+                      window.setTimeout(cb, 0, results);
+                    }
+                    resolve(results);
+                });
       // shim getStats with maplike support
+      /*
       var results = new Map();
       Promise.all(promises).then(function(res) {
         res.forEach(function(result) {
@@ -1308,7 +1398,8 @@ module.exports = function(edgeVersion) {
           window.setTimeout(cb, 0, results);
         }
         resolve(results);
-      });
+      });*/
+
     });
   };
   return RTCPeerConnection;

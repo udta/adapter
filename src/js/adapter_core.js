@@ -38,11 +38,13 @@
   // Shim browser if found.
   switch (browserDetails.browser) {
     case 'chrome':
+    case 'opera':
+    case 'vivaldi':
       if (!chromeShim || !chromeShim.shimPeerConnection) {
         logging('Chrome shim is not included in this adapter release.');
         return;
       }
-      logging('adapter.js shimming chrome.');
+      logging( 'adapter.js shimming ' + browserDetails.browser );
       // Export to the adapter global object visible in the browser.
       module.exports.browserShim = chromeShim;
 
@@ -110,22 +112,29 @@
 
       break;
     case 'safari':
-      if (navigator.webkitGetUserMedia) {
+      if (navigator.webkitGetUserMedia || navigator.getUserMedia) {
           if (!safariShim) {
             logging('Safari shim is not included in this adapter release.');
             return;
           }
 
+          browserDetails.isSupportWebRTC = true;
+          browserDetails.isSupportORTC = false;
+          browserDetails.isWebRTCPluginInstalled = false;
+          browserDetails.WebRTCPluginVersion = undefined;
+
           // Export to the adapter global object visible in the browser.
           module.exports.browserShim = safariShim;
           safariShim.shimOnAddStream();
           safariShim.shimGetUserMedia();
+          window.attachMediaStream = safariShim.attachMediaStream;
+
           logging('adapter.js shimming safari.');
       } else {
           if (!pluginShim||!pluginShim.shimPeerConnection) {
               logging('Safari Plugin shim is not included in this adapter release.');
               return;
-            }
+          }
 
           // init  You need to call loadPlugin() first of all....
           browserDetails.isSupportWebRTC = false;
