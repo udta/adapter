@@ -194,23 +194,45 @@ module.exports = function(edgeVersion) {
   };
 
   RTCPeerConnection.prototype.addStream = function(stream) {
-    if (edgeVersion >= 15025) {
-      this.localStreams.push(stream);
-    } else {
-      // Clone is necessary for local demos mostly, attaching directly
-      // to two different senders does not work (build 10547).
-      // Fixed in 15025 (or earlier)
-      var clonedStream = stream.clone();
-      stream.getTracks().forEach(function(track, idx) {
-        var clonedTrack = clonedStream.getTracks()[idx];
-        track.addEventListener('enabled', function(event) {
-          clonedTrack.enabled = event.enabled;
-        });
-      });
-      this.localStreams.push(clonedStream);
-    }
-    this._maybeFireNegotiationNeeded();
-  };
+   var self = this;
+   if (edgeVersion >= 15025) {
+     this.localStreams.push(stream);
+   } else {
+     // Clone is necessary for local demos mostly, attaching directly
+     // to two different senders does not work (build 10547).
+     // Fixed in 15025 (or earlier)
+     var clonedStream = stream.clone();
+     stream.getTracks().forEach(function(track, idx) {
+       var clonedTrack = clonedStream.getTracks()[idx];
+       track.addEventListener('enabled', function(event) {
+         clonedTrack.enabled = event.enabled;
+       });
+     });
+     this.localStreams.push(clonedStream);
+   }
+   this._maybeFireNegotiationNeeded();
+
+   if (self.transceivers.length > 0 && self.transceivers[0].sendEncodingParameters &&
+     self.transceivers[0].sendEncodingParameters.length > 0 && !self.transceivers[0].sendEncodingParameters.rtx &&
+     self.transceivers[0].dtlsTransport && !self.transceivers[0].rtpSender &&
+     self.localStreams.length > 0 && self.localStreams[0].getTracks().length >= 0) {
+     
+     var localTrack;
+     var b_audio = self.localStreams[0].getAudioTracks().length > 0;
+     localTrack = b_audio ? self.localStreams[0].getAudioTracks()[0] : self.localStreams[0].getVideoTracks()[0];
+
+     if (localTrack) {
+       // add RTX
+       if (edgeVersion >= 15019 && !b_audio) {
+         self.transceivers[0].sendEncodingParameters[0].rtx = {
+           ssrc: (2 * 0 + 2) * 1001 + 1
+         };
+       }
+       self.transceivers[0].rtpSender = new RTCRtpSender(localTrack,
+         self.transceivers[0].dtlsTransport);
+     }
+   }
+ };
 
   RTCPeerConnection.prototype.removeStream = function(stream) {
     var idx = this.localStreams.indexOf(stream);
