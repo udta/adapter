@@ -288,8 +288,16 @@ var pluginShim = {
                 });
 
                 // TODO: For adjust the video size synced with the original video element (rzhang)
-
-                 element.pluginObj.src = stream;
+                var job = window.setInterval(function() {
+                        if (element.pluginObj.videoHeight < 100) {
+                            console.info("Reattach Media Stream into Object!");
+                            element.pluginObj.src = stream;
+                        } else {
+                            console.info("Attach Media Stream into Object done!");
+                            window.clearInterval(job);
+                        }
+                        
+                    }, 500);
                  //after setting src, hide video
                  //if(adapter.browserDetails.browser == 'ie'){
                  //    element.pluginObj.style.display = "none";

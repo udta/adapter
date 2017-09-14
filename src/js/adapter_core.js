@@ -112,7 +112,7 @@
 
       break;
     case 'safari':
-      if (navigator.webkitGetUserMedia || navigator.getUserMedia) {
+      if (navigator.mediaDevices.getUserMedia) {
           if (!safariShim) {
             logging('Safari shim is not included in this adapter release.');
             return;
@@ -125,8 +125,14 @@
 
           // Export to the adapter global object visible in the browser.
           module.exports.browserShim = safariShim;
-          safariShim.shimOnAddStream();
-          safariShim.shimGetUserMedia();
+
+          safariShim.shimCreateObjectURL();
+          safariShim.shimRTCIceServerUrls(window);
+          safariShim.shimCallbacksAPI(window);
+          safariShim.shimLocalStreamsAPI(window);
+          safariShim.shimRemoteStreamsAPI(window);
+          safariShim.shimTrackEventTransceiver(window);
+          safariShim.shimGetUserMedia(window);
           window.attachMediaStream = safariShim.attachMediaStream;
 
           logging('adapter.js shimming safari.');
