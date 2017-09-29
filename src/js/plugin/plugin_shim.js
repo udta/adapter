@@ -8,8 +8,8 @@
  */
  /* eslint-env node */
 'use strict';
-var logging = require('../utils.js').log;
-var browserDetails = require('../utils.js').browserDetails;
+var utils = require('../utils.js');
+var logging = utils.log;
 var _promise = require('../es6-promise.min.js').Promise;
 
 var getUserMediaDelayed;
@@ -18,13 +18,16 @@ var webrtcDetectedBrowser = null;
 var webrtcDetectedVersion = null;
 var loadCount = 10;
 
+var browserDetails = utils.detectBrowser(window);
+var navigator = window && window.navigator;
+
 var getPlugin = function () {
     return document.getElementById('IPVTPluginId');
 };
 var extractPluginObj = function (elt) {
     return elt.isWebRtcPlugin ? elt : elt.pluginObj;
 };
-// http://www.w3.org/TR/mediacapture-streams/#idl-def-MediaStreamTrack
+
 var installPlugin = function() {
         if (document.getElementById("IPVTPluginId")) {
            if (document.getElementById("IPVTPluginId").versionName != undefined) {
@@ -56,24 +59,19 @@ var installPlugin = function() {
         pluginObj.setAttribute('height', '0');
 
         if (pluginObj.isWebRtcPlugin || (typeof navigator.plugins !== "undefined" && (!!navigator.plugins["IPVideoTalk Plug-in for IE"] || navigator.plugins["IPVideoTalk Plug-in for Safari"]))) {
-           // console.log("Plugin version: " + pluginObj.versionName + ", adapter version: 1.3.1");
-            //logging("Plugin version: " + pluginObj.versionName + ", adapter version: 1.0.4");
-            logging("adapter version: 2.0.3.1, Start to load the Plugin!!");
+        logging("adapter version: 5.0.4, Start to load the Plugin!!");
             if (isInternetExplorer) {
-                //console.log("This appears to be Internet Explorer");
-                logging("This appears to be Internet Explorer");
+            logging("This appears to be Internet Explorer");
                 webrtcDetectedBrowser = "Internet Explorer";
             }
             else if (isSafari) {
-                //console.log("This appears to be Safari");
-                logging("This appears to be Safari");
+            logging("This appears to be Safari");
                 webrtcDetectedBrowser = "Safari";
             }
             else; // any other NAPAPI-capable browser comes here
         }
         else {
-            //console.log("Browser does not appear to be WebRTC-capable");
-            logging("Browser does not appear to be WebRTC-capable");
+        logging("Browser does not appear to be WebRTC-capable");
             //Removed the element, if the plugin installing failed
             document.body.removeChild(pluginObj);
         }
@@ -121,8 +119,15 @@ var pluginShim = {
                 elt.addEventListener("on" + type, listener, useCapture);
             }
         }
+        },
+
+    getPlugin: function() {
+        return document.getElementById('IPVTPluginId');
     },
-    checkPlugin: function() {
+    checkPlugin: function(window) {
+
+        var browserDetails = window.adapter.browserDetails; 
+
         if (browserDetails.browser == "safari") {
            if ( navigator.plugins["IPVideoTalk Plug-in for Safari"] != undefined) {
         	  var version = undefined;
@@ -164,8 +169,9 @@ var pluginShim = {
       	return {"isWebRTCPluginInstalled":browserDetails.isWebRTCPluginInstalled,"WebRTCPluginVersion":browserDetails.WebRTCPluginVersion};
         
     },
-    loadPlugin:  function(callback) {
+    loadPlugin:  function(window, callback) {
         logging("loadPlugin !!!!!!!");
+        var browserDetails = window.adapter.browserDetails;
         if (browserDetails.WebRTCPluginVersion != undefined) {
             if (callback){//it's mean already installed
             	callback();
@@ -195,7 +201,10 @@ var pluginShim = {
         }
     },
 
-    attachMediaStream: function(element, stream) {
+    // Attach a media stream to an element.
+    shimAttachMediaStream: function(window) {
+
+        var attachMediaStream = function(element, stream) {
         logging("Plugin: Attaching media stream");
         if (stream==null) {
           logging("stream is null");
@@ -309,7 +318,11 @@ var pluginShim = {
         }
         else if (element.nodeName.toLowerCase() === 'audio') {
             return element;
+            }
         }
+
+            window.attachMediaStream = attachMediaStream;
+
     },
 
     drawImage: function (context, video, x, y, width, height) {
@@ -337,95 +350,98 @@ var pluginShim = {
 
     // http://www.w3.org/TR/webrtc/#interface-definition
     // http://www.w3.org/TR/webrtc/#rtcpeerconnection-interface-extensions-2
-    shimRTCPeerConnection: function (configuration, constraints) {
+    shimRTCPeerConnection: function(window) {
+
+        var RTCPeerConnection = function (configuration, constraints) {
         return getPlugin().createPeerConnection(configuration, constraints);
+        }
+
+            window.RTCPeerConnection = RTCPeerConnection;
     },
 
     // http://www.w3.org/TR/webrtc/#rtcicecandidate-type
-    shimRTCIceCandidate: function (RTCIceCandidateInit) {
+    shimRTCIceCandidate: function(window) {
+        var RTCIceCandidate = function (RTCIceCandidateInit) {
         return getPlugin().createIceCandidate(RTCIceCandidateInit);
+        }
+
+            window.RTCIceCandidate = RTCIceCandidate;
     },
 
     // http://www.w3.org/TR/webrtc/#session-description-model
-    shimRTCSessionDescription: function (RTCSessionDescriptionInit) {
+    shimRTCSessionDescription: function(window) {
+        var RTCSessionDescription = function (RTCSessionDescriptionInit) {
         return getPlugin().createSessionDescription(RTCSessionDescriptionInit);
+        }
+
+            window.RTCSessionDescription = RTCSessionDescription;
     },
 
-  shimOnTrack: function() {
+  shimOnTrack: function(window) {
     if (typeof window === 'object' && window.RTCPeerConnection && !('ontrack' in
         window.RTCPeerConnection.prototype)) {
       Object.defineProperty(window.RTCPeerConnection.prototype, 'ontrack', {
         get: function() { return this._ontrack; },
         set: function(f) {
-          var self = this;
-          if (this._ontrack) {
+                    if (this._ontrack) {
             this.removeEventListener('track', this._ontrack);
-            this.removeEventListener('addstream', this._ontrackpoly);
           }
           this.addEventListener('track', this._ontrack = f);
-          this.addEventListener('addstream', this._ontrackpoly = function(e) {
-            // onaddstream does not fire when a track is added to an existing stream.
-            // but stream.onaddtrack is implemented so we use that
-            e.stream.addEventListener('addtrack', function(te) {
-              var event = new Event('track');
-              event.track = te.track;
-              event.receiver = {track: te.track};
-              event.streams = [e.stream];
-              self.dispatchEvent(event);
+                }
             });
-            e.stream.getTracks().forEach(function(track) {
-              var event = new Event('track');
-              event.track = track;
-              event.receiver = {track: track};
-              event.streams = [e.stream];
-              this.dispatchEvent(event);
-            }.bind(this));
-          }.bind(this));
-        }
-      });
-    }
-  },
-
-  shimSourceObject: function() {
-    if (typeof window === 'object') {
-      if (window.HTMLMediaElement &&
-        !('srcObject' in window.HTMLMediaElement.prototype)) {
-        // Shim the srcObject property, once, when HTMLMediaElement is found.
-        Object.defineProperty(window.HTMLMediaElement.prototype, 'srcObject', {
-          get: function() {
-            return this._srcObject;
-          },
-          set: function(stream) {
-            // Use _srcObject as a private property for this shim
-            this._srcObject = stream;
-            if (this.src) {
-              URL.revokeObjectURL(this.src);
+            var origSetRemoteDescription =
+                window.RTCPeerConnection.prototype.setRemoteDescription;
+            window.RTCPeerConnection.prototype.setRemoteDescription = function() {
+                var pc = this;
+                if (!pc._ontrackpoly) {
+                    pc._ontrackpoly = function(e) {
+            // onaddstream does not fire when a track is added to an existing
+                        // stream. But stream.onaddtrack is implemented so we use that.
+                        e.stream.addEventListener('addtrack', function(te) {
+              var receiver;
+                                if (window.RTCPeerConnection.prototype.getReceivers) {
+                                    receiver = pc.getReceivers().find(function(r) {
+                                            return r.track && r.track.id === te.track.id;
+                                        });
+                                } else {
+                                    receiver = {track: te.track};
             }
-            this.src = URL.createObjectURL(stream);
-            // We need to recreate the blob url when a track is added or removed.
-            // Doing it manually since we want to avoid a recursion.
-            stream.addEventListener('addtrack', function() {
-              if (self.src) {
-                URL.revokeObjectURL(self.src);
-              }
-              self.src = URL.createObjectURL(stream);
+
+                                var event = new Event('track');
+              event.track = te.track;
+              event.receiver = receiver;
+                                event.transceiver = { receiver: receiver };
+              event.streams = [e.stream];
+                                pc.dispatchEvent(event);
             });
-            stream.addEventListener('removetrack', function() {
-              if (self.src) {
-                URL.revokeObjectURL(self.src);
-              }
-              self.src = URL.createObjectURL(stream);
+                        e.stream.getTracks().forEach(function(track) {
+                                var receiver;
+                                if (window.RTCPeerConnection.prototype.getReceivers) {
+                                    receiver = pc.getReceivers().find(function(r) {
+            return r.track && r.track.id === track.id;
+          });
+                                } else {
+                                    receiver = { track: track };
+            }
+                                var event = new Event('track');
+                                event.track = track;
+                                event.receiver = receiver;
+                                event.transceiver = { receiver: receiver };
+                                event.streams = [ e.stream ];
+                                pc.dispatchEvent(event);
             });
-          }
-        });
+                    };
+                    pc.addEventListener('addstream', pc._ontrackpoly);
+              }
+                return origSetRemoteDescription.apply(pc, arguments);
+            };
       }
-    }
-  },
+    },
 
   shimLoadWindows: function() {
         if (getPlugin()) {
             if (typeof getPlugin().getWindowList !== 'undefined') {
-                var windowArray = [];
+                var windowArray = [ ];
                 var windowsStr = getPlugin().getWindowList();
                 var windowList = windowsStr.split(/xxz;;;xxz/);
                 for (var i = 0; i < windowList.length; ++i) {
@@ -449,7 +465,7 @@ var pluginShim = {
   shimLoadScreens: function() {
         if (getPlugin()) {
             if (typeof getPlugin().getScreenList !== 'undefined') {
-                var screenArray = [];
+                var screenArray = [ ];
                 var screenStr = getPlugin().getScreenList();
                 var screenList = screenStr.split(/xxz;;;xxz/);
                 for (var i = 0; i < screenList.length; ++i) {
@@ -476,17 +492,15 @@ var pluginShim = {
 // Expose public methods.
 module.exports = {
   shimOnTrack: pluginShim.shimOnTrack,
-  shimSourceObject: pluginShim.shimSourceObject,
-  shimPeerConnection: pluginShim.shimRTCPeerConnection,
+    shimPeerConnection: pluginShim.shimRTCPeerConnection,
   shimGetUserMedia: require('./getusermedia'),
-  attachMediaStream: pluginShim.attachMediaStream,
+    shimAttachMediaStream: pluginShim.shimAttachMediaStream,
   shimRTCIceCandidate: pluginShim.shimRTCIceCandidate,
   shimRTCSessionDescription: pluginShim.shimRTCSessionDescription,
-  //shimInstallPlugin: pluginShim.installPlugin,
-  shimAttachEventListener: pluginShim.attachEventListener,
+    shimAttachEventListener: pluginShim.attachEventListener,
   loadWindows: pluginShim.shimLoadWindows,
   loadScreens: pluginShim.shimLoadScreens,
+    getPlugin: pluginShim.getPlugin,
   checkPlugin: pluginShim.checkPlugin,
   loadPlugin: pluginShim.loadPlugin
- //reattachMediaStream: pluginShim.reattachMediaStream
 };

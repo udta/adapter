@@ -1,7 +1,7 @@
 [![Build Status](https://travis-ci.org/webrtc/adapter.svg)](https://travis-ci.org/webrtc/adapter)
 
 # WebRTC adapter #
-[adapter.js] is a shim to insulate apps from spec changes and prefix differences. In fact, the standards and protocols used for WebRTC implementations are highly stable, and there are only a few prefixed names. For full interop information, see [webrtc.org/web-apis/interop](http://www.webrtc.org/web-apis/interop).
+adapter.js is a shim to insulate apps from spec changes and prefix differences. In fact, the standards and protocols used for WebRTC implementations are highly stable, and there are only a few prefixed names. For full interop information, see [webrtc.org/web-apis/interop](https://www.webrtc.org/web-apis/interop).
 
 ## Install ##
 
@@ -23,8 +23,8 @@ See [webrtc/samples repo](https://github.com/webrtc/samples/blob/gh-pages/packag
 #### Prebuilt releases
 ##### Web
 In the [gh-pages branch](https://github.com/webrtc/adapter/tree/gh-pages) prebuilt ready to use files can be downloaded/linked directly.
-Latest version can be found at http://webrtc.github.io/adapter/adapter-latest.js.
-Specific versions can be found at http://webrtc.github.io/adapter/adapter-N.N.N.js, e.g. http://webrtc.github.io/adapter/adapter-1.0.2.js.
+Latest version can be found at https://webrtc.github.io/adapter/adapter-latest.js.
+Specific versions can be found at https://webrtc.github.io/adapter/adapter-N.N.N.js, e.g. https://webrtc.github.io/adapter/adapter-1.0.2.js.
 
 ##### Bower
 You will find `adapter.js` in `bower_components/webrtc-adapter/`.
@@ -45,11 +45,23 @@ Head over to [test/README.md](https://github.com/webrtc/samples/blob/gh-pages/te
 
 ## Publish a new version ##
 * Go the the adapter repository root directory
-* Make sure your repository is clean, i.e. no untracked files etc
+* Make sure your repository is clean, i.e. no untracked files etc. Also check that you are on the master branch and have pulled the latest changes.
 * Depending on the impact of the release, either use `patch`, `minor` or `major` in place of `<version>`. Run `npm version <version> -m 'bump to %s'` and type in your password lots of times (setting up credential caching is probably a good idea).
 * Create and merge the PR if green in the GitHub web ui
-* Run `git pull`
-* Run `npm publish`
+* Go to the releases tab in the GitHub web ui and edit the tag.
+* Add a summary of the recent commits in the tag summary and a link to the diff between the previous and current version in the description, [example](https://github.com/webrtc/adapter/releases/tag/v3.4.1).
+* Go back to your checkout and run `git pull`
+* Run `npm publish` (you need access to the [webrtc-adapter npmjs package](https://www.npmjs.com/package/webrtc-adapter))
 * Done! There should now be a new release published to NPM and the gh-pages branch.
 
 Note: Currently only tested on Linux, not sure about Mac but will definitely not work on Windows.
+
+### Publish a hotfix patch versions
+In some cases it may be necessary to do a patch version while there are significant changes changes on the master branch.
+To make a patch release,
+* checkout the latest git tag using `git checkout tags/vMajor.minor.patch`.
+* checkout a new branch, using a name such as patchrelease-major-minor-patch. 
+* cherry-pick the fixes using `git cherry-pick some-commit-hash`.
+* run `npm version patch`. This will create a new patch version and publish it on github.
+* check out `origin/bumpVersion` branch and publish the new version using `npm publish`.
+* the branch can now safely be deleted. It is not necessary to merge it into the main branch since it only contains cherry-picked commits.

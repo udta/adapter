@@ -8,10 +8,10 @@
  /* eslint-env node */
 'use strict';
 
-var browserDetails = require('../utils').browserDetails;
+var utils = require('../utils');
 
 var firefoxShim = {
-  shimOnTrack: function() {
+  shimOnTrack: function(window) {
     if (typeof window === 'object' && window.RTCPeerConnection && !('ontrack' in
         window.RTCPeerConnection.prototype)) {
       Object.defineProperty(window.RTCPeerConnection.prototype, 'ontrack', {
@@ -29,6 +29,7 @@ var firefoxShim = {
               var event = new Event('track');
               event.track = track;
               event.receiver = {track: track};
+              event.transceiver = {receiver: event.receiver};
               event.streams = [e.stream];
               this.dispatchEvent(event);
             }.bind(this));
@@ -36,9 +37,18 @@ var firefoxShim = {
         }
       });
     }
+    if (typeof window === 'object' && window.RTCTrackEvent &&
+        ('receiver' in window.RTCTrackEvent.prototype) &&
+        !('transceiver' in window.RTCTrackEvent.prototype)) {
+      Object.defineProperty(window.RTCTrackEvent.prototype, 'transceiver', {
+        get: function() {
+          return {receiver: this.receiver};
+        }
+      });
+    }
   },
 
-  shimSourceObject: function() {
+  shimSourceObject: function(window) {
     // Firefox has supported mozSrcObject since FF22, unprefixed in 42.
     if (typeof window === 'object') {
       if (window.HTMLMediaElement &&
@@ -56,12 +66,9 @@ var firefoxShim = {
     }
   },
 
-  // Attach a media stream to an element.
-  attachMediaStream: function(element, stream) {
-    element.srcObject = stream;
-  },
+  shimPeerConnection: function(window) {
+    var browserDetails = utils.detectBrowser(window);
 
-  shimPeerConnection: function() {
     if (typeof window !== 'object' || !(window.RTCPeerConnection ||
         window.mozRTCPeerConnection)) {
       return; // probably media.peerconnection.enabled=false in about:config
@@ -94,38 +101,40 @@ var firefoxShim = {
             pcConfig.iceServers = newIceServers;
           }
         }
-        return new mozRTCPeerConnection(pcConfig, pcConstraints);
+        return new window.mozRTCPeerConnection(pcConfig, pcConstraints);
       };
-      window.RTCPeerConnection.prototype = mozRTCPeerConnection.prototype;
+      window.RTCPeerConnection.prototype =
+          window.mozRTCPeerConnection.prototype;
 
       // wrap static methods. Currently just generateCertificate.
-      if (mozRTCPeerConnection.generateCertificate) {
+      if (window.mozRTCPeerConnection.generateCertificate) {
         Object.defineProperty(window.RTCPeerConnection, 'generateCertificate', {
           get: function() {
-            return mozRTCPeerConnection.generateCertificate;
+            return window.mozRTCPeerConnection.generateCertificate;
           }
         });
       }
 
-      window.RTCSessionDescription = mozRTCSessionDescription;
-      window.RTCIceCandidate = mozRTCIceCandidate;
+      window.RTCSessionDescription = window.mozRTCSessionDescription;
+      window.RTCIceCandidate = window.mozRTCIceCandidate;
     }
 
     // shim away need for obsolete RTCIceCandidate/RTCSessionDescription.
     ['setLocalDescription', 'setRemoteDescription', 'addIceCandidate']
         .forEach(function(method) {
-          var nativeMethod = RTCPeerConnection.prototype[method];
-          RTCPeerConnection.prototype[method] = function() {
+          var nativeMethod = window.RTCPeerConnection.prototype[method];
+          window.RTCPeerConnection.prototype[method] = function() {
             arguments[0] = new ((method === 'addIceCandidate') ?
-                RTCIceCandidate : RTCSessionDescription)(arguments[0]);
+                window.RTCIceCandidate :
+                window.RTCSessionDescription)(arguments[0]);
             return nativeMethod.apply(this, arguments);
           };
         });
 
     // support for addIceCandidate(null or undefined)
     var nativeAddIceCandidate =
-        RTCPeerConnection.prototype.addIceCandidate;
-    RTCPeerConnection.prototype.addIceCandidate = function() {
+        window.RTCPeerConnection.prototype.addIceCandidate;
+    window.RTCPeerConnection.prototype.addIceCandidate = function() {
       if (!arguments[0]) {
         if (arguments[1]) {
           arguments[1].apply(null);
@@ -153,8 +162,8 @@ var firefoxShim = {
       remotecandidate: 'remote-candidate'
     };
 
-    var nativeGetStats = RTCPeerConnection.prototype.getStats;
-    RTCPeerConnection.prototype.getStats = function(selector, onSucc, onErr) {
+    var nativeGetStats = window.RTCPeerConnection.prototype.getStats;
+    window.RTCPeerConnection.prototype.getStats = function(selector, onSucc, onErr) {
       return nativeGetStats.apply(this, [selector || null])
         .then(function(stats) {
           if (browserDetails.version < 48) {
@@ -183,6 +192,17 @@ var firefoxShim = {
         })
         .then(onSucc, onErr);
     };
+  },
+
+  // Attach a media stream to an element.
+  shimAttachMediaStream: function(window) {
+      var browserDetails = utils.detectBrowser(window);
+
+      var attachMediaStream = function(element, stream) {
+          element.src = URL.createObjectURL(stream);
+    }
+
+      window.attachMediaStream = attachMediaStream;
   }
 };
 
@@ -192,5 +212,6 @@ module.exports = {
   shimSourceObject: firefoxShim.shimSourceObject,
   shimPeerConnection: firefoxShim.shimPeerConnection,
   shimGetUserMedia: require('./getusermedia'),
-  attachMediaStream: firefoxShim.attachMediaStream
+  shimAttachMediaStream: firefoxShim.shimAttachMediaStream
+
 };

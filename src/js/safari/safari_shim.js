@@ -253,64 +253,54 @@ var safariShim = {
       });
     }
   },
-  // Attach a media stream to an element.
-  attachMediaStream: function(element, stream) {
-    /*if (browserDetails.version >= 43) {
-      element.srcObject = stream;
-    } else*/
-    if (typeof element.src !== 'undefined') {
-      element.src = URL.createObjectURL(stream);
-    } else {
-      //logging('Error attaching stream to element.');
-    }
-  },
 
-    shimCreateObjectURL: function() {
-    if (!(typeof window === 'object' && window.HTMLMediaElement &&
-          'srcObject' in window.HTMLMediaElement.prototype)) {
-      // Only shim CreateObjectURL using srcObject if srcObject exists.
-      return undefined;
-    }
-
-    var nativeCreateObjectURL = URL.createObjectURL.bind(URL);
-    var nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
-    var streams = new Map(), newId = 0;
-
-    URL.createObjectURL = function(stream) {
-      if ('getTracks' in stream) {
-        var url = 'polyblob:' + (++newId);
-        streams.set(url, stream);
-        console.log('URL.createObjectURL(stream) is deprecated! ' +
-                    'Use elem.srcObject = stream instead!');
-        return url;
+  shimCreateOfferLegacy: function(window) {
+    var origCreateOffer = window.RTCPeerConnection.prototype.createOffer;
+    window.RTCPeerConnection.prototype.createOffer = function(offerOptions) {
+      var pc = this;
+      if (offerOptions) {
+        var audioTransceiver = pc.getTransceivers().find(function(transceiver) {
+          return transceiver.sender.track &&
+              transceiver.sender.track.kind === 'audio';
+        });
+        if (offerOptions.offerToReceiveAudio === false && audioTransceiver) {
+          if (audioTransceiver.getDirection() === 'sendrecv') {
+            audioTransceiver.setDirection('sendonly');
+          } else if (audioTransceiver.getDirection() === 'recvonly') {
+            audioTransceiver.setDirection('inactive');
+          }
+        } else if (offerOptions.offerToReceiveAudio === true &&
+            !audioTransceiver) {
+          pc.addTransceiver('audio');
       }
-      return nativeCreateObjectURL(stream);
-    };
-    URL.revokeObjectURL = function(url) {
-      nativeRevokeObjectURL(url);
-      streams.delete(url);
-    };
 
-    var dsc = Object.getOwnPropertyDescriptor(window.HTMLMediaElement.prototype,
-                                              'src');
-    Object.defineProperty(window.HTMLMediaElement.prototype, 'src', {
-      get: function() {
-        return dsc.get.apply(this);
-      },
-      set: function(url) {
-        this.srcObject = streams.get(url) || null;
-        return dsc.set.apply(this, [url]);
-      }
+        var videoTransceiver = pc.getTransceivers().find(function(transceiver) {
+          return transceiver.sender.track &&
+              transceiver.sender.track.kind === 'video';
     });
-
-    var nativeSetAttribute = HTMLMediaElement.prototype.setAttribute;
-    HTMLMediaElement.prototype.setAttribute = function() {
-      if (arguments.length === 2 &&
-          ('' + arguments[0]).toLowerCase() === 'src') {
-        this.srcObject = streams.get(arguments[1]) || null;
+        if (offerOptions.offerToReceiveVideo === false && videoTransceiver) {
+          if (videoTransceiver.getDirection() === 'sendrecv') {
+            videoTransceiver.setDirection('sendonly');
+          } else if (audioTransceiver.getDirection() === 'recvonly') {
+            videoTransceiver.setDirection('inactive');
       }
-      return nativeSetAttribute.apply(this, arguments);
-    };
+        } else if (offerOptions.offerToReceiveVideo === true &&
+            !videoTransceiver) {
+          pc.addTransceiver('video');
+        }
+      }
+      return origCreateOffer.apply(pc, arguments);
+      };
+  },
+  // Attach a media stream to an element.
+  shimAttachMediaStream: function(window) {
+      var browserDetails = utils.detectBrowser(window);
+
+      var attachMediaStream = function(element, stream) {
+          element.src = URL.createObjectURL(stream);
+      }
+
+      window.attachMediaStream = attachMediaStream;
   }
 
 };
@@ -323,8 +313,9 @@ module.exports = {
   shimGetUserMedia: safariShim.shimGetUserMedia,
   shimRTCIceServerUrls: safariShim.shimRTCIceServerUrls,
   shimTrackEventTransceiver: safariShim.shimTrackEventTransceiver,
-  attachMediaStream: safariShim.attachMediaStream,
-  shimCreateObjectURL: safariShim.shimCreateObjectURL
+  shimCreateOfferLegacy: safariShim.shimCreateOfferLegacy,
+  shimAttachMediaStream: safariShim.shimAttachMediaStream
+
   // TODO
   // shimPeerConnection: safariShim.shimPeerConnection
 };

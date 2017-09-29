@@ -8,7 +8,8 @@
  /* eslint-env node */
 'use strict';
 
-var logDisabled_ = false;
+var logDisabled_ = true;
+var deprecationWarnings_ = true;
 
 // Utility methods.
 var utils = {
@@ -22,6 +23,19 @@ var utils = {
         'adapter.js logging enabled';
   },
 
+  /**
+   * Disable or enable deprecation warnings
+   * @param {!boolean} bool set to true to disable warnings.
+   */
+  disableWarnings: function(bool) {
+    if (typeof bool !== 'boolean') {
+      return new Error('Argument type: ' + typeof bool +
+          '. Please use a boolean.');
+    }
+    deprecationWarnings_ = !bool;
+    return 'adapter.js deprecation warnings ' + (bool ? 'disabled' : 'enabled');
+  },
+
   log: function() {
     if (typeof window === 'object') {
       if (logDisabled_) {
@@ -31,6 +45,17 @@ var utils = {
         console.log.apply(console, arguments);
       }
     }
+  },
+
+  /**
+   * Shows a deprecation warning suggesting the modern and spec-compatible API.
+   */
+  deprecated: function(oldMethod, newMethod) {
+    if (!deprecationWarnings_) {
+      return;
+    }
+    console.warn(oldMethod + ' is deprecated, please use ' + newMethod +
+        ' instead.');
   },
 
   /**
@@ -52,8 +77,10 @@ var utils = {
    * @return {object} result containing browser and version
    *     properties.
    */
-  detectBrowser: function() {
-    // Returned result object.
+  detectBrowser: function(window) {
+      var navigator = window && window.navigator;
+
+      // Returned result object.
     var result = {};
     result.browser = null;
     result.version = null;
@@ -93,13 +120,18 @@ var utils = {
 
     // all webkit-based browsers
     } else if (navigator.webkitGetUserMedia && window.webkitRTCPeerConnection) {
-      // Chrome, Chromium, Webview, Opera, all use the chrome shim for now
+      // Chrome, Chromium, Webview, Opera, Vivaldi all use the chrome shim for now
       var isOpera = navigator.userAgent.match(/(OPR|Opera).([\d.]+)/) ? true : false;
-      if (isOpera) {
+        //var isVivaldi = navigator.userAgent.match(/(Vivaldi).([\d.]+)/) ? true : false;
+        if (isOpera) {
           result.browser = 'opera';
           result.version = this.extractVersion(navigator.userAgent,
               /O(PR|pera)\/(\d+)\./, 2);
-      } else {
+      }/* else if (isVivaldi) {
+          result.browser = 'vivaldi';
+          result.version = this.extractVersion(navigator.userAgent,
+                                               /(Vivaldi)\/(\d+)\./, 2);
+        }*/ else {
           result.browser = 'chrome';
           result.version = this.extractVersion(navigator.userAgent,
               /Chrom(e|ium)\/(\d+)\./, 2);
@@ -137,64 +169,15 @@ var utils = {
     }
 
     return result;
-  },
-
-  // shimCreateObjectURL must be called before shimSourceObject to avoid loop.
-
-  shimCreateObjectURL: function() {
-    if (!(typeof window === 'object' && window.HTMLMediaElement &&
-          'srcObject' in window.HTMLMediaElement.prototype)) {
-      // Only shim CreateObjectURL using srcObject if srcObject exists.
-      return undefined;
-    }
-
-    var nativeCreateObjectURL = URL.createObjectURL.bind(URL);
-    var nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL);
-    var streams = new Map(), newId = 0;
-
-    URL.createObjectURL = function(stream) {
-      if ('getTracks' in stream) {
-        var url = 'polyblob:' + (++newId);
-        streams.set(url, stream);
-        console.log('URL.createObjectURL(stream) is deprecated! ' +
-                    'Use elem.srcObject = stream instead!');
-        return url;
-      }
-      return nativeCreateObjectURL(stream);
-    };
-    URL.revokeObjectURL = function(url) {
-      nativeRevokeObjectURL(url);
-      streams.delete(url);
-    };
-
-    var dsc = Object.getOwnPropertyDescriptor(window.HTMLMediaElement.prototype,
-                                              'src');
-    Object.defineProperty(window.HTMLMediaElement.prototype, 'src', {
-      get: function() {
-        return dsc.get.apply(this);
-      },
-      set: function(url) {
-        this.srcObject = streams.get(url) || null;
-        return dsc.set.apply(this, [url]);
-      }
-    });
-
-    var nativeSetAttribute = HTMLMediaElement.prototype.setAttribute;
-    HTMLMediaElement.prototype.setAttribute = function() {
-      if (arguments.length === 2 &&
-          ('' + arguments[0]).toLowerCase() === 'src') {
-        this.srcObject = streams.get(arguments[1]) || null;
-      }
-      return nativeSetAttribute.apply(this, arguments);
-    };
   }
 };
 
 // Export.
 module.exports = {
   log: utils.log,
+  deprecated: utils.deprecated,
   disableLog: utils.disableLog,
-  browserDetails: utils.detectBrowser(),
+  disableWarnings: utils.disableWarnings,
   extractVersion: utils.extractVersion,
   shimCreateObjectURL: utils.shimCreateObjectURL,
   detectBrowser: utils.detectBrowser.bind(utils)

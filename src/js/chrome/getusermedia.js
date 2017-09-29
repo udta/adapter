@@ -7,11 +7,14 @@
  */
  /* eslint-env node */
 'use strict';
-var logging = require('../utils.js').log;
-var browserDetails = require('../utils.js').browserDetails;
+var utils = require('../utils.js');
+var logging = utils.log;
 
 // Expose public methods.
-module.exports = function() {
+module.exports = function(window) {
+  var browserDetails = utils.detectBrowser(window);
+  var navigator = window && window.navigator;
+
   var constraintsToChrome_ = function(c) {
     if (typeof c !== 'object' || c.mandatory || c.optional) {
       return c;
@@ -64,10 +67,17 @@ module.exports = function() {
   };
 
   var shimConstraints_ = function(constraints, func) {
-    logging('chrome: input constraints is: ' + JSON.stringify(constraints));
-
     constraints = JSON.parse(JSON.stringify(constraints));
-    if (constraints && constraints.audio) {
+    if (constraints && typeof constraints.audio === 'object') {
+      var remap = function(obj, a, b) {
+        if (a in obj && !(b in obj)) {
+          obj[b] = obj[a];
+          delete obj[a];
+        }
+      };
+      constraints = JSON.parse(JSON.stringify(constraints));
+      remap(constraints.audio, 'autoGainControl', 'googAutoGainControl');
+      remap(constraints.audio, 'noiseSuppression', 'googNoiseSuppression');
       constraints.audio = constraintsToChrome_(constraints.audio);
     }
     if (constraints && typeof constraints.video === 'object') {
@@ -123,7 +133,12 @@ module.exports = function() {
     return {
       name: {
         PermissionDeniedError: 'NotAllowedError',
-        ConstraintNotSatisfiedError: 'OverconstrainedError'
+        InvalidStateError: 'NotReadableError',
+        DevicesNotFoundError: 'NotFoundError',
+        ConstraintNotSatisfiedError: 'OverconstrainedError',
+        TrackStartError: 'NotReadableError',
+        MediaDeviceFailedDueToShutdown: 'NotReadableError',
+        MediaDeviceKillSwitchOn: 'NotReadableError'
       }[e.name] || e.name,
       message: e.message,
       constraint: e.constraintName,
@@ -136,7 +151,9 @@ module.exports = function() {
   var getUserMedia_ = function(constraints, onSuccess, onError) {
     shimConstraints_(constraints, function(c) {
       navigator.webkitGetUserMedia(c, onSuccess, function(e) {
+        if (onError) {
         onError(shimError_(e));
+        }
       });
     });
   };
@@ -156,7 +173,7 @@ module.exports = function() {
       enumerateDevices: function() {
         return new Promise(function(resolve) {
           var kinds = {audio: 'audioinput', video: 'videoinput'};
-          return MediaStreamTrack.getSources(function(devices) {
+          return window.MediaStreamTrack.getSources(function(devices) {
             resolve(devices.map(function(device) {
               return {label: device.label,
                       kind: kinds[device.kind],

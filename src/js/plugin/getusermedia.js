@@ -7,7 +7,8 @@
  */
  /* eslint-env node */
 'use strict';
-var logging = require('../utils.js').log;
+var utils = require('../utils.js');
+var logging = utils.log;
 
 var getPlugin = function () {
         return document.getElementById('IPVTPluginId');
@@ -34,8 +35,11 @@ var getSources = function (gotSources) { // not part of the standard (at least, 
 };
 
 // Expose public methods.
-module.exports = function() {
-  var constraintsToPlugin_ = function(c) {
+module.exports = function(window) {
+    var browserDetails = utils.detectBrowser(window);
+    var navigator = window && window.navigator;
+
+    var constraintsToPlugin_ = function(c) {
     if (typeof c !== 'object' || c.mandatory || c.optional) {
       return c;
     }
@@ -55,7 +59,7 @@ module.exports = function() {
         return (name === 'deviceId') ? 'sourceId' : name;
       };
       if (r.ideal !== undefined) {
-        cc.optional = cc.optional || [];
+        cc.optional = cc.optional || [ ];
         var oc = {};
         if (typeof r.ideal === 'number') {
           oc[oldname_('min', key)] = r.ideal;
@@ -81,49 +85,71 @@ module.exports = function() {
       }
     });
     if (c.advanced) {
-      cc.optional = (cc.optional || []).concat(c.advanced);
+      cc.optional = (cc.optional || [ ]).concat(c.advanced);
     }
     return cc;
   };
 
   var shimConstraints_ = function(constraints, func) {
     constraints = JSON.parse(JSON.stringify(constraints));
-    if (constraints && constraints.audio) {
-      constraints.audio = constraintsToPlugin_(constraints.audio);
+    if (constraints && typeof constraints.audio === 'object') {
+            var remap = function(obj, a, b) {
+                if (a in obj && !(b in obj)) {
+                    obj[b] = obj[a];
+                    delete obj[a];
+                }
+            };
+            constraints = JSON.parse(JSON.stringify(constraints));
+            remap(constraints.audio, 'autoGainControl', 'googAutoGainControl');
+            remap(constraints.audio, 'noiseSuppression', 'googNoiseSuppression');
+            constraints.audio = constraintsToChrome_(constraints.audio);
     }
     if (constraints && typeof constraints.video === 'object') {
-      // Shim facingMode for mobile, where it defaults to "user".
-      var face = constraints.video.facingMode;
+      // Shim facingMode for mobile & surface pro.
+            var face = constraints.video.facingMode;
       face = face && ((typeof face === 'object') ? face : {ideal: face});
+            var getSupportedFacingModeLies = browserDetails.version < 61;
 
       if ((face && (face.exact === 'user' || face.exact === 'environment' ||
                     face.ideal === 'user' || face.ideal === 'environment')) &&
           !(navigator.mediaDevices.getSupportedConstraints &&
-            navigator.mediaDevices.getSupportedConstraints().facingMode)) {
+            navigator.mediaDevices.getSupportedConstraints().facingMode &&
+                    !getSupportedFacingModeLies)) {
         delete constraints.video.facingMode;
+                var matches;
         if (face.exact === 'environment' || face.ideal === 'environment') {
-          // Look for "back" in label, or use last cam (typically back cam).
+                    matches = [ 'back', 'rear' ];
+                } else if (face.exact === 'user' || face.ideal === 'user') {
+                    matches = [ 'front' ];
+                }
+                if (matches) {
+          // Look for matches in label, or use last cam for back (typical).
           return navigator.mediaDevices.enumerateDevices()
           .then(function(devices) {
             devices = devices.filter(function(d) {
               return d.kind === 'videoinput';
             });
-            var back = devices.find(function(d) {
-              return d.label.toLowerCase().indexOf('back') !== -1;
-            }) || (devices.length && devices[devices.length - 1]);
-            if (back) {
-              constraints.video.deviceId = face.exact ? {exact: back.deviceId} :
-                                                        {ideal: back.deviceId};
+            var dev = devices.find(function(d) {
+                                    return matches.some(function(match) {
+              return d.label.toLowerCase().indexOf(match) !== -1;
+            });
+                                });
+                            if (!dev && devices.length && matches.indexOf('back') !== -1) {
+                                dev = devices[devices.length - 1]; // more likely the back cam
+                            }
+                            if (dev) {
+              constraints.video.deviceId = face.exact ? {exact: dev.deviceId} :
+                                                        {ideal: dev.deviceId};
             }
-            constraints.video = constraintsToPlugin_(constraints.video);
-            logging('plugin: ' + JSON.stringify(constraints));
+            constraints.video = constraintsToChrome_(constraints.video);
+            logging('Plugin: ' + JSON.stringify(constraints));
             return func(constraints);
           });
         }
       }
-      constraints.video = constraintsToPlugin_(constraints.video);
+      constraints.video = constraintsToChrome_(constraints.video);
     }
-    logging('pulgin: ' + JSON.stringify(constraints));
+    logging('Plugin: ' + JSON.stringify(constraints));
     return func(constraints);
   };
 
@@ -131,8 +157,13 @@ module.exports = function() {
     return {
       name: {
         PermissionDeniedError: 'NotAllowedError',
-        ConstraintNotSatisfiedError: 'OverconstrainedError'
-      }[e.name] || e.name,
+                InvalidStateError: 'NotReadableError',
+                DevicesNotFoundError: 'NotFoundError',
+        ConstraintNotSatisfiedError: 'OverconstrainedError',
+                TrackStartError: 'NotReadableError',
+                MediaDeviceFailedDueToShutdown: 'NotReadableError',
+                MediaDeviceKillSwitchOn: 'NotReadableError'
+            }[e.name] || e.name,
       message: e.message,
       constraint: e.constraintName,
       toString: function() {
@@ -190,8 +221,14 @@ module.exports = function() {
                                          deviceId: device.id,
                                          groupId: '' };
                               }));
+                            });
                       });
-              });
+              },
+            getSupportedConstraints: function() {
+                return { //Todo: RZHANG check if the plugin is support all?
+                       deviceId: true, echoCancellation: true, facingMode: true,
+                       frameRate: true, height: true, width: true
+                };
       } };
   }
 

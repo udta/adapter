@@ -36,8 +36,8 @@ module.exports = function(grunt) {
           }
         }
       },
-      // Use this if you do not want Microsoft Edge shim to be included and do not
-      // want adapter to expose anything to the global scope.
+      // Use this if you do not want Microsoft Edge shim to be included and
+      // do not want adapter to expose anything to the global scope.
       adapterNoEdgeAndNoGlobalObject: {
         src: ['./src/js/adapter_core.js'],
         dest: './out/adapter_no_edge_no_global.js',
@@ -57,7 +57,7 @@ module.exports = function(grunt) {
       options: {
         configFile: '.eslintrc'
       },
-      target: ['src/**/*.js', 'test/*.js', 'test/unit/*.js']
+      target: ['src/**/*.js', 'test/*.js', 'test/unit/*.js', 'test/e2e/*.js']
     },
     copy: {
       build: {
@@ -68,15 +68,22 @@ module.exports = function(grunt) {
         expand: true
       }
     },
+    shell: {
+      downloadBrowser : {
+        command: 'BROWSER=${BROWSER-chrome} BVER=${BVER-stable} ./node_modules/travis-multirunner/setup.sh'
+      },
+    },
   });
 
   grunt.loadNpmTasks('grunt-githooks');
   grunt.loadNpmTasks('grunt-eslint');
   grunt.loadNpmTasks('grunt-browserify');
   grunt.loadNpmTasks('grunt-contrib-copy');
+  grunt.loadNpmTasks('grunt-shell');
 
   grunt.registerTask('default', ['eslint', 'browserify']);
   grunt.registerTask('lint', ['eslint']);
   grunt.registerTask('build', ['browserify']);
   grunt.registerTask('copyForPublish', ['copy']);
+  grunt.registerTask('downloadBrowser', ['shell:downloadBrowser'])
 };
