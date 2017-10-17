@@ -84,6 +84,7 @@ var utils = {
     var result = {};
     result.browser = null;
     result.version = null;
+    result.UIVersion = null;
 
     // Fail early if it's not a browser
     if (typeof window === 'undefined' || !window.navigator) {
@@ -97,6 +98,7 @@ var utils = {
       result.browser = 'edge';
       result.version = this.extractVersion(navigator.userAgent,
           /Edge\/(\d+).(\d+)$/, 2);
+      result.UIVersion = navigator.userAgent.match(/Edge\/([\d.]+)/)[1]; //Edge/16.17017
     
     } // IE
     else if ( !navigator.mediaDevices && ( !!window.ActiveXObject 
@@ -104,12 +106,14 @@ var utils = {
                                          navigator.userAgent.match(/MSIE (\d+)/) 
                                          || navigator.userAgent.match(/rv:(\d+)/) ) ) {
       result.browser = 'ie';
-      result.version = this.extractVersion(navigator.userAgent,
-          /MSIE (\d+).(\d+)/, 1);
+      if ( navigator.userAgent.match(/MSIE (\d+)/) ) {
+        result.version = this.extractVersion(navigator.userAgent, /MSIE (\d+).(\d+)/, 1);
+        result.UIVersion = navigator.userAgent.match(/MSIE ([\d.]+)/)[1]; //MSIE 10.6
 
-      /*For IE 11*/
-      if (navigator.userAgent.match(/rv:(\d+)/)) {
+      } else if ( navigator.userAgent.match(/rv:(\d+)/) ) {
+          /*For IE 11*/
           result.version = this.extractVersion(navigator.userAgent, /rv:(\d+).(\d+)/, 1);
+          result.UIVersion = navigator.userAgent.match(/rv:([\d.]+)/)[1]; //rv:11.0
       }
 
       // Firefox.
@@ -117,6 +121,7 @@ var utils = {
       result.browser = 'firefox';
       result.version = this.extractVersion(navigator.userAgent,
           /Firefox\/(\d+)\./, 1);
+      result.UIVersion = navigator.userAgent.match(/Firefox\/([\d.]+)/)[1]; //Firefox/56.0
 
     // all webkit-based browsers
     } else if (navigator.webkitGetUserMedia && window.webkitRTCPeerConnection) {
@@ -127,14 +132,17 @@ var utils = {
           result.browser = 'opera';
           result.version = this.extractVersion(navigator.userAgent,
               /O(PR|pera)\/(\d+)\./, 2);
+          result.UIVersion = navigator.userAgent.match(/O(PR|pera)\/([\d.]+)/)[2]; //OPR/48.0.2685.39
       }/* else if (isVivaldi) {
           result.browser = 'vivaldi';
           result.version = this.extractVersion(navigator.userAgent,
-                                               /(Vivaldi)\/(\d+)\./, 2);
-        }*/ else {
+                                            /(Vivaldi)\/(\d+)\./, 2);
+          result.UIVersion = navigator.userAgent.match(/Vivaldi\/([\d.]+)/)[1]; //Vivaldi/1.93.955.38
+     }*/ else {
           result.browser = 'chrome';
           result.version = this.extractVersion(navigator.userAgent,
               /Chrom(e|ium)\/(\d+)\./, 2);
+          result.UIVersion = navigator.userAgent.match(/Chrom(e|ium)\/([\d.]+)/)[2]; //Chrome/61.0.3163.100 
       }
 
     // Safari or unknown webkit-based
@@ -157,6 +165,8 @@ var utils = {
           result.browser = 'safari';
           result.version = this.extractVersion(navigator.userAgent,
             /AppleWebKit\/(\d+)\./, 1);
+          result.UIVersion = navigator.userAgent.match(/Version\/([\d.]+)/)[1]; //Version/11.0.1
+
         } else { // unknown webkit-based browser.
           result.browser = 'Unsupported webkit-based browser ' +
               'with GUM support but no WebRTC support.';

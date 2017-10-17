@@ -231,6 +231,7 @@ module.exports = function(dependencies, opts) {
   //Lock all details
   Object.freeze(adapter.browserDetails.browser)
   Object.freeze(adapter.browserDetails.version)
+  Object.freeze(adapter.browserDetails.UIVersion)
   Object.freeze(adapter.browserDetails)
 
   return adapter;
