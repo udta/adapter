@@ -143,18 +143,39 @@ var pluginShim = {
                 if (version == undefined) {
                     version = "1.0.1.3";
                 }
-                browserDetails.WebRTCPluginVersion = version;
-                browserDetails.isWebRTCPluginInstalled = true;
-                browserDetails.isSupportWebRTC = true;
+
+                if ( Object.isFrozen(window.adapter.browserDetails) === false ) {
+                    browserDetails.WebRTCPluginVersion = version;
+                    browserDetails.isWebRTCPluginInstalled = true;
+                    browserDetails.isSupportWebRTC = true;
+
+                    //For plugin, we need to lock it after plugin installed
+                    Object.freeze(window.adapter.browserDetails.browser)
+                    Object.freeze(window.adapter.browserDetails.version)
+                    Object.freeze(window.adapter.browserDetails.UIVersion)
+
+                    Object.freeze(window.adapter.browserDetails)
+                }
             }
 
         } else if (browserDetails.browser == "ie") {
             //It said IE11 support navigator.plugins...  just said...
             var result = installPlugin(window);
-            browserDetails.isWebRTCPluginInstalled = result.installed; //installing is undefined
+            //browserDetails.isWebRTCPluginInstalled = result.installed; //installing is undefined
             if (result.installed == true) {
-                browserDetails.WebRTCPluginVersion = result.version;
-                browserDetails.isSupportWebRTC = true;
+
+                if ( Object.isFrozen(window.adapter.browserDetails) === false ) {
+                    browserDetails.WebRTCPluginVersion = result.version;
+                    browserDetails.isSupportWebRTC = true;
+                    browserDetails.isWebRTCPluginInstalled = true;
+
+                    //For plugin, we need to lock it after plugin installed
+                    Object.freeze(window.adapter.browserDetails.browser)
+                    Object.freeze(window.adapter.browserDetails.version)
+                    Object.freeze(window.adapter.browserDetails.UIVersion)
+
+                    Object.freeze(window.adapter.browserDetails)
+                }
             } else if (result.installed == false) {
                 /*Install Plugin failed !!!*/
                 browserDetails.WebRTCPluginVersion = null;
@@ -190,6 +211,7 @@ var pluginShim = {
             if (result.installed == true) {
                 browserDetails.WebRTCPluginVersion = result.version;
                 browserDetails.isSupportWebRTC = true;
+                
                 if (callback) {
                     callback();
                 }

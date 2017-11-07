@@ -163,7 +163,11 @@ var firefoxShim = {
     };
 
     var nativeGetStats = window.RTCPeerConnection.prototype.getStats;
-    window.RTCPeerConnection.prototype.getStats = function(selector, onSucc, onErr) {
+    window.RTCPeerConnection.prototype.getStats = function(
+      selector,
+      onSucc,
+      onErr
+    ) {
       return nativeGetStats.apply(this, [selector || null])
         .then(function(stats) {
           if (browserDetails.version < 48) {
@@ -194,16 +198,30 @@ var firefoxShim = {
     };
   },
 
+  shimRemoveStream: function(window) {
+    if ('removeStream' in window.RTCPeerConnection.prototype) {
+      return;
+    }
+    window.RTCPeerConnection.prototype.removeStream = function(stream) {
+      utils.deprecated('removeStream', 'removeTrack');
+      this.getSenders().forEach(function(sender) {
+        if (sender.track && stream.getTracks().indexOf(sender.track) !== -1) {
+          this.removeTrack(sender);
+        }
+      });
+    };
+  },
+
   // Attach a media stream to an element.
   shimAttachMediaStream: function(window) {
-      var browserDetails = utils.detectBrowser(window);
+          var browserDetails = utils.detectBrowser(window);
 
-      var attachMediaStream = function(element, stream) {
-          element.src = URL.createObjectURL(stream);
-    }
+          var attachMediaStream = function(element, stream) {
+              element.src = URL.createObjectURL(stream);
+          }
 
-      window.attachMediaStream = attachMediaStream;
-  }
+              window.attachMediaStream = attachMediaStream;
+      }
 };
 
 // Expose public methods.
@@ -211,6 +229,7 @@ module.exports = {
   shimOnTrack: firefoxShim.shimOnTrack,
   shimSourceObject: firefoxShim.shimSourceObject,
   shimPeerConnection: firefoxShim.shimPeerConnection,
+  shimRemoveStream: firefoxShim.shimRemoveStream,
   shimGetUserMedia: require('./getusermedia'),
   shimAttachMediaStream: firefoxShim.shimAttachMediaStream
 

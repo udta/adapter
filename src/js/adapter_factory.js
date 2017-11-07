@@ -101,6 +101,7 @@ module.exports = function(dependencies, opts) {
       firefoxShim.shimSourceObject(window);
       firefoxShim.shimPeerConnection(window);
       firefoxShim.shimOnTrack(window);
+      firefoxShim.shimRemoveStream(window);
       firefoxShim.shimAttachMediaStream(window);
 
       commonShim.shimRTCIceCandidate(window);
@@ -138,33 +139,33 @@ module.exports = function(dependencies, opts) {
       break;
     case 'safari':
 
-      if (/*false &&*/ navigator.mediaDevices.getUserMedia) {
-          if (!safariShim || !options.shimSafari) {
-            logging('Safari shim is not included in this adapter release.');
-            return adapter;
-          }
+       if ( navigator.mediaDevices && navigator.mediaDevices.getUserMedia ) {
+              if (!safariShim || !options.shimSafari) {
+                  logging('Safari shim is not included in this adapter release.');
+                  return adapter;
+              }
 
-          adapter.browserDetails.isSupportWebRTC = true;
-          adapter.browserDetails.isSupportORTC = false;
-          adapter.browserDetails.isWebRTCPluginInstalled = false;
-          adapter.browserDetails.WebRTCPluginVersion = undefined;
+              adapter.browserDetails.isSupportWebRTC = true;
+              adapter.browserDetails.isSupportORTC = false;
+              adapter.browserDetails.isWebRTCPluginInstalled = false;
+              adapter.browserDetails.WebRTCPluginVersion = undefined;
 
-          logging('adapter.js shimming safari which is support WebRTC.');
-          // Export to the adapter global object visible in the browser.
-          adapter.browserShim = safariShim;
-          commonShim.shimCreateObjectURL(window);
+              logging('adapter.js shimming safari which is support WebRTC.');
+              // Export to the adapter global object visible in the browser.
+              adapter.browserShim = safariShim;
+              commonShim.shimCreateObjectURL(window);
 
-          safariShim.shimRTCIceServerUrls(window);
-          safariShim.shimCallbacksAPI(window);
-          safariShim.shimLocalStreamsAPI(window);
-          safariShim.shimRemoteStreamsAPI(window);
-          safariShim.shimTrackEventTransceiver(window);
-          safariShim.shimGetUserMedia(window);
-          safariShim.shimCreateOfferLegacy(window);
-          safariShim.shimAttachMediaStream(window);
+              safariShim.shimRTCIceServerUrls(window);
+              safariShim.shimCallbacksAPI(window);
+              safariShim.shimLocalStreamsAPI(window);
+              safariShim.shimRemoteStreamsAPI(window);
+              safariShim.shimTrackEventTransceiver(window);
+              safariShim.shimGetUserMedia(window);
+              safariShim.shimCreateOfferLegacy(window);
+              safariShim.shimAttachMediaStream(window);
 
-          commonShim.shimRTCIceCandidate(window);
-      } else {
+              commonShim.shimRTCIceCandidate(window);
+        } else {
           if (!pluginShim || !options.shimPlugin) {
               logging('Safari Plugin shim is not included in this adapter release.');
               return adapter;
@@ -229,10 +230,16 @@ module.exports = function(dependencies, opts) {
   }
 
   //Lock all details
-  Object.freeze(adapter.browserDetails.browser)
-  Object.freeze(adapter.browserDetails.version)
-  Object.freeze(adapter.browserDetails.UIVersion)
-  Object.freeze(adapter.browserDetails)
+
+  if ( adapter.browserDetails.isSupportWebRTC === true 
+       || adapter.browserDetails.isSupportORTC === true ) {
+      Object.freeze(adapter.browserDetails.browser)
+      Object.freeze(adapter.browserDetails.version)
+      Object.freeze(adapter.browserDetails.UIVersion)
+
+      Object.freeze(adapter.browserDetails)
+      //For plugin, we need to lock it after plugin installed
+  }
 
   return adapter;
 };
