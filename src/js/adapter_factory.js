@@ -233,9 +233,12 @@ module.exports = function(dependencies, opts) {
 
   if ( adapter.browserDetails.isSupportWebRTC === true 
        || adapter.browserDetails.isSupportORTC === true ) {
-      Object.freeze(adapter.browserDetails.browser)
-      Object.freeze(adapter.browserDetails.version)
-      Object.freeze(adapter.browserDetails.UIVersion)
+
+      if ( adapter.browserDetails.browser != 'ie' ) {
+          Object.freeze(adapter.browserDetails.browser)
+          Object.freeze(adapter.browserDetails.version)
+          Object.freeze(adapter.browserDetails.UIVersion)
+      }
 
       Object.freeze(adapter.browserDetails)
       //For plugin, we need to lock it after plugin installed

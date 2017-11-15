@@ -170,9 +170,9 @@ var pluginShim = {
                     browserDetails.isWebRTCPluginInstalled = true;
 
                     //For plugin, we need to lock it after plugin installed
-                    Object.freeze(window.adapter.browserDetails.browser)
-                    Object.freeze(window.adapter.browserDetails.version)
-                    Object.freeze(window.adapter.browserDetails.UIVersion)
+                    //Object.freeze(window.adapter.browserDetails.browser)
+                    //Object.freeze(window.adapter.browserDetails.version)
+                    //Object.freeze(window.adapter.browserDetails.UIVersion)
 
                     Object.freeze(window.adapter.browserDetails)
                 }
@@ -190,7 +190,14 @@ var pluginShim = {
 
     },
     loadPlugin:  function(window, callback) {
+
+        if (!window.adapter) {
+            logging("Adapter did not ready yet.");
+            return;
+        }
+
         logging("loadPlugin !!!!!!!");
+
         var browserDetails = window.adapter.browserDetails;
         if (browserDetails.WebRTCPluginVersion != undefined) {
             if (callback) { //it's mean already installed
