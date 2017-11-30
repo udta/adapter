@@ -663,7 +663,7 @@ var chromeShim = {
       var browserDetails = utils.detectBrowser(window);
 
       var attachMediaStream = function(element, stream) {
-          element.src = URL.createObjectURL(stream);
+          element.srcObject = stream;
     }
 
       window.attachMediaStream = attachMediaStream;
