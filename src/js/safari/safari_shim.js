@@ -140,6 +140,7 @@ var safariShim = {
     var setLocalDescription = prototype.setLocalDescription;
     var setRemoteDescription = prototype.setRemoteDescription;
     var addIceCandidate = prototype.addIceCandidate;
+    var getStats = prototype.getStats;
 
     prototype.createOffer = function(successCallback, failureCallback) {
       var options = (arguments.length >= 2) ? arguments[2] : arguments[0];
@@ -190,6 +191,17 @@ var safariShim = {
       return Promise.resolve();
     };
     prototype.addIceCandidate = withCallback;
+
+    withCallback = function(selector, successCallback, failureCallback) {
+        var promise = getStats.apply(this, [ selector ]);
+        if (!failureCallback) {
+          return promise;
+        }
+        promise.then(successCallback, failureCallback);
+        return Promise.resolve();
+    };
+    prototype.getStats = withCallback;        
+
   },
   shimGetUserMedia: function(window) {
     var navigator = window && window.navigator;

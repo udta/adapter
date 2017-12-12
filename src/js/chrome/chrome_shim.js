@@ -538,7 +538,7 @@ var chromeShim = {
       // either no arguments or the selector argument is null.
       if (origGetStats.length === 0 && (arguments.length === 0 ||
           typeof arguments[0] !== 'function')) {
-        return origGetStats.apply(this, []);
+        return origGetStats.apply(this, [ arguments[1], arguments[0], arguments[2] ]); //Modified by rzhang
       }
 
       var fixChromeStats_ = function(response) {

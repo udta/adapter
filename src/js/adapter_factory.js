@@ -10,6 +10,7 @@
 'use strict';
 
 var utils = require('./utils');
+var statsCollector = require('./stats_collector');
 // Shimming starts here.
 module.exports = function(dependencies, opts) {
   var window = dependencies && dependencies.window;
@@ -233,6 +234,9 @@ module.exports = function(dependencies, opts) {
 
   if ( adapter.browserDetails.isSupportWebRTC === true 
        || adapter.browserDetails.isSupportORTC === true ) {
+      
+      statsCollector.shimStatPC(window);
+      statsCollector.shimStatGUM(window);
 
       if ( adapter.browserDetails.browser != 'ie' ) {
           Object.freeze(adapter.browserDetails.browser)
