@@ -3,8 +3,12 @@
 var utils = require('./utils.js');
 var logging = utils.log;
 var statDisabled_ = window.localStorage.statsSending == "true" ? false : true;
-var trace = require('./trace-ws.js')(window.localStorage.statsServer ? window.localStorage.statsServer : 'wss://stats.ipvideotalk.com')
-
+var trace = null;
+if (!statDisabled_) {
+    trace = require('./trace-ws.js')(window.localStorage.statsServer ? window.localStorage.statsServer : 'wss://stats.ipvideotalk.com')
+} else {
+    trace = function(){};
+}
 // transforms a maplike to an object. Mostly for getStats +
 // JSON.parse(JSON.stringify())
 function map2obj(m) {
@@ -114,11 +118,6 @@ function removeTimestamps(results) {
 */
 
 var stats_collector = {
-    initCollector: function(window, bool, server) {
-        trace('InitCollector');
-        statDisabled_ = bool;
-
-    },
 
     shimStatPC: function(window) {
 
@@ -431,7 +430,6 @@ var stats_collector = {
 
 // Export.
 module.exports = {
-    initCollector: stats_collector.initCollector,
     shimStatPC: stats_collector.shimStatPC,
     shimStatGUM: stats_collector.shimStatGUM
 };
