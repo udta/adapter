@@ -137,11 +137,17 @@ var stats_collector = {
                 pc.prevStats = { };
             }
 
-            constraints.optional.forEach(function(a) {
-                    if (a.pcName) {
-                        pc.pcName = a.pcName;
-                    }
-                });
+            if (constraints && constraints.optional) {
+                constraints.optional.forEach(function(a) {
+                        if (a.pcName) {
+                            pc.pcName = a.pcName;
+                        }
+                    });
+            } 
+
+            if (!pc.pcName){
+                pc.pcName = "PC_Unknown_" + Math.random().toString(36).substr(2);
+            }
             var id = pc.pcName;
 
             if (!config) {
