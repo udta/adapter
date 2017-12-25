@@ -102,7 +102,7 @@ module.exports = function(window) {
             constraints = JSON.parse(JSON.stringify(constraints));
             remap(constraints.audio, 'autoGainControl', 'googAutoGainControl');
             remap(constraints.audio, 'noiseSuppression', 'googNoiseSuppression');
-            constraints.audio = constraintsToChrome_(constraints.audio);
+            constraints.audio = constraintsToPlugin_(constraints.audio);
     }
     if (constraints && typeof constraints.video === 'object') {
       // Shim facingMode for mobile & surface pro.
@@ -141,35 +141,37 @@ module.exports = function(window) {
               constraints.video.deviceId = face.exact ? {exact: dev.deviceId} :
                                                         {ideal: dev.deviceId};
             }
-            constraints.video = constraintsToChrome_(constraints.video);
+            constraints.video = constraintsToPlugin_(constraints.video);
             logging('Plugin: ' + JSON.stringify(constraints));
             return func(constraints);
           });
         }
       }
-      constraints.video = constraintsToChrome_(constraints.video);
+      constraints.video = constraintsToPlugin_(constraints.video);
     }
     logging('Plugin: ' + JSON.stringify(constraints));
     return func(constraints);
   };
 
   var shimError_ = function(e) {
-    return {
-      name: {
-        PermissionDeniedError: 'NotAllowedError',
-                InvalidStateError: 'NotReadableError',
-                DevicesNotFoundError: 'NotFoundError',
-        ConstraintNotSatisfiedError: 'OverconstrainedError',
-                TrackStartError: 'NotReadableError',
-                MediaDeviceFailedDueToShutdown: 'NotReadableError',
-                MediaDeviceKillSwitchOn: 'NotReadableError'
-            }[e.name] || e.name,
-      message: e.message,
-      constraint: e.constraintName,
-      toString: function() {
-        return this.name + (this.message && ': ') + this.message;
+
+      var errObj = {};
+      if (e && typeof e === 'string' && e.match(/(access|denied)/g).length >= 2) {
+          /*Permission to access camera/microphone denied*/
+          errObj.name = 'NotAllowedError';
+          errObj.message = e;
+          errObj.constraint = null;
+      } else {
+          errObj.name = 'OverconstrainedError';
+          errObj.message = e;
+          errObj.constraint = null;
       }
-    };
+
+      errObj.toString = function() {
+          return this.name + (this.message && ': ') + this.message;
+      }
+      
+      return errObj;
   };
 
   var getUserMedia_ = function (constraints, onSuccess, onError) {
