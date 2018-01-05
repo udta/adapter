@@ -213,5 +213,16 @@ module.exports = {
     }
       });
           };
+  },
+
+  // Attach a media stream to an element.
+  shimAttachMediaStream: function(window) {
+      var browserDetails = utils.detectBrowser(window);
+
+      var attachMediaStream = function(element, stream) {
+          element.src = URL.createObjectURL(stream);
+      }
+      window.attachMediaStream = attachMediaStream;
   }
+
 };
