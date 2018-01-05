@@ -11,8 +11,22 @@
 var logDisabled_ = false;
 var deprecationWarnings_ = true;
 
+/**
+ * Extract browser version out of the provided user agent string.
+ *
+ * @param {!string} uastring userAgent string.
+ * @param {!string} expr Regular expression used as match criteria.
+ * @param {!number} pos position in the version string to be returned.
+ * @return {!number} browser version.
+ */
+function extractVersion(uastring, expr, pos) {
+  var match = uastring.match(expr);
+  return match && match.length >= pos && parseInt(match[pos], 10);
+}
+
 // Utility methods.
-var utils = {
+module.exports = {
+  extractVersion: extractVersion,
   disableLog: function(bool) {
     if (typeof bool !== 'boolean') {
       return new Error('Argument type: ' + typeof bool +
@@ -59,19 +73,6 @@ var utils = {
   },
 
   /**
-   * Extract browser version out of the provided user agent string.
-   *
-   * @param {!string} uastring userAgent string.
-   * @param {!string} expr Regular expression used as match criteria.
-   * @param {!number} pos position in the version string to be returned.
-   * @return {!number} browser version.
-   */
-  extractVersion: function(uastring, expr, pos) {
-    var match = uastring.match(expr);
-    return match && match.length >= pos && parseInt(match[pos], 10);
-  },
-
-  /**
    * Browser detector.
    *
    * @return {object} result containing browser and version
@@ -96,7 +97,7 @@ var utils = {
      if (navigator.mediaDevices &&
         navigator.userAgent.match(/Edge\/(\d+).(\d+)$/)) {
       result.browser = 'edge';
-      result.version = this.extractVersion(navigator.userAgent,
+      result.version = extractVersion(navigator.userAgent,
           /Edge\/(\d+).(\d+)$/, 2);
       result.UIVersion = navigator.userAgent.match(/Edge\/([\d.]+)/)[1]; //Edge/16.17017
     
@@ -107,19 +108,19 @@ var utils = {
                                          || navigator.userAgent.match(/rv:(\d+)/) ) ) {
       result.browser = 'ie';
       if ( navigator.userAgent.match(/MSIE (\d+)/) ) {
-        result.version = this.extractVersion(navigator.userAgent, /MSIE (\d+).(\d+)/, 1);
+        result.version = extractVersion(navigator.userAgent, /MSIE (\d+).(\d+)/, 1);
         result.UIVersion = navigator.userAgent.match(/MSIE ([\d.]+)/)[1]; //MSIE 10.6
 
       } else if ( navigator.userAgent.match(/rv:(\d+)/) ) {
           /*For IE 11*/
-          result.version = this.extractVersion(navigator.userAgent, /rv:(\d+).(\d+)/, 1);
+          result.version = extractVersion(navigator.userAgent, /rv:(\d+).(\d+)/, 1);
           result.UIVersion = navigator.userAgent.match(/rv:([\d.]+)/)[1]; //rv:11.0
       }
 
       // Firefox.
     } else if (navigator.mozGetUserMedia) {
       result.browser = 'firefox';
-      result.version = this.extractVersion(navigator.userAgent,
+      result.version = extractVersion(navigator.userAgent,
           /Firefox\/(\d+)\./, 1);
       result.UIVersion = navigator.userAgent.match(/Firefox\/([\d.]+)/)[1]; //Firefox/56.0
 
@@ -130,17 +131,17 @@ var utils = {
         //var isVivaldi = navigator.userAgent.match(/(Vivaldi).([\d.]+)/) ? true : false;
         if (isOpera) {
           result.browser = 'opera';
-          result.version = this.extractVersion(navigator.userAgent,
+          result.version = extractVersion(navigator.userAgent,
               /O(PR|pera)\/(\d+)\./, 2);
           result.UIVersion = navigator.userAgent.match(/O(PR|pera)\/([\d.]+)/)[2]; //OPR/48.0.2685.39
       }/* else if (isVivaldi) {
           result.browser = 'vivaldi';
-          result.version = this.extractVersion(navigator.userAgent,
+          result.version = extractVersion(navigator.userAgent,
                                             /(Vivaldi)\/(\d+)\./, 2);
           result.UIVersion = navigator.userAgent.match(/Vivaldi\/([\d.]+)/)[1]; //Vivaldi/1.93.955.38
      }*/ else {
           result.browser = 'chrome';
-          result.version = this.extractVersion(navigator.userAgent,
+          result.version = extractVersion(navigator.userAgent,
               /Chrom(e|ium)\/(\d+)\./, 2);
           result.UIVersion = navigator.userAgent.match(/Chrom(e|ium)\/([\d.]+)/)[2]; //Chrome/61.0.3163.100 
       }
@@ -163,7 +164,7 @@ var utils = {
         //
         if (navigator.userAgent.match(/Version\/(\d+).(\d+)/)) {
           result.browser = 'safari';
-          result.version = this.extractVersion(navigator.userAgent,
+          result.version = extractVersion(navigator.userAgent,
             /AppleWebKit\/(\d+)\./, 1);
           result.UIVersion = navigator.userAgent.match(/Version\/([\d.]+)/)[1]; //Version/11.0.1
 
@@ -180,15 +181,4 @@ var utils = {
 
     return result;
   }
-};
-
-// Export.
-module.exports = {
-  log: utils.log,
-  deprecated: utils.deprecated,
-  disableLog: utils.disableLog,
-  disableWarnings: utils.disableWarnings,
-  extractVersion: utils.extractVersion,
-  shimCreateObjectURL: utils.shimCreateObjectURL,
-  detectBrowser: utils.detectBrowser.bind(utils)
 };

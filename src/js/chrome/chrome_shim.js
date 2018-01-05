@@ -11,7 +11,8 @@
 var utils = require('../utils.js');
 var logging = utils.log;
 
-var chromeShim = {
+module.exports = {
+  shimGetUserMedia: require('./getusermedia'),
   shimMediaStream: function(window) {
     window.MediaStream = window.MediaStream || window.webkitMediaStream;
   },
@@ -226,12 +227,88 @@ var chromeShim = {
     }
   },
 
+  shimAddTrackRemoveTrackWithNative: function(window) {
+    // shim addTrack/removeTrack with native variants in order to make
+    // the interactions with legacy getLocalStreams behave as in other browsers.
+    // Keeps a mapping stream.id => [stream, rtpsenders...]
+    window.RTCPeerConnection.prototype.getLocalStreams = function() {
+      var pc = this;
+      this._shimmedLocalStreams = this._shimmedLocalStreams || {};
+      return Object.keys(this._shimmedLocalStreams).map(function(streamId) {
+        return pc._shimmedLocalStreams[streamId][0];
+      });
+    };
+
+    var origAddTrack = window.RTCPeerConnection.prototype.addTrack;
+    window.RTCPeerConnection.prototype.addTrack = function(track, stream) {
+      if (!stream) {
+        return origAddTrack.apply(this, arguments);
+      }
+      this._shimmedLocalStreams = this._shimmedLocalStreams || {};
+
+      var sender = origAddTrack.apply(this, arguments);
+      if (!this._shimmedLocalStreams[stream.id]) {
+        this._shimmedLocalStreams[stream.id] = [stream, sender];
+      } else if (this._shimmedLocalStreams[stream.id].indexOf(sender) === -1) {
+        this._shimmedLocalStreams[stream.id].push(sender);
+      }
+      return sender;
+    };
+
+    var origAddStream = window.RTCPeerConnection.prototype.addStream;
+    window.RTCPeerConnection.prototype.addStream = function(stream) {
+      var pc = this;
+      this._shimmedLocalStreams = this._shimmedLocalStreams || {};
+
+      stream.getTracks().forEach(function(track) {
+        var alreadyExists = pc.getSenders().find(function(s) {
+          return s.track === track;
+        });
+        if (alreadyExists) {
+          throw new DOMException('Track already exists.',
+              'InvalidAccessError');
+        }
+      });
+      var existingSenders = pc.getSenders();
+      origAddStream.apply(this, arguments);
+      var newSenders = pc.getSenders().filter(function(newSender) {
+        return existingSenders.indexOf(newSender) === -1;
+      });
+      this._shimmedLocalStreams[stream.id] = [stream].concat(newSenders);
+    };
+
+    var origRemoveStream = window.RTCPeerConnection.prototype.removeStream;
+    window.RTCPeerConnection.prototype.removeStream = function(stream) {
+      this._shimmedLocalStreams = this._shimmedLocalStreams || {};
+      delete this._shimmedLocalStreams[stream.id];
+      return origRemoveStream.apply(this, arguments);
+    };
+
+    var origRemoveTrack = window.RTCPeerConnection.prototype.removeTrack;
+    window.RTCPeerConnection.prototype.removeTrack = function(sender) {
+      var pc = this;
+      this._shimmedLocalStreams = this._shimmedLocalStreams || {};
+      if (sender) {
+        Object.keys(this._shimmedLocalStreams).forEach(function(streamId) {
+          var idx = pc._shimmedLocalStreams[streamId].indexOf(sender);
+          if (idx !== -1) {
+            pc._shimmedLocalStreams[streamId].splice(idx, 1);
+            }
+          if (pc._shimmedLocalStreams[streamId].length === 1) {
+            delete pc._shimmedLocalStreams[streamId];
+          }
+        });
+      }
+      return origRemoveTrack.apply(this, arguments);
+    };
+  },
+
   shimAddTrackRemoveTrack: function(window) {
     var browserDetails = utils.detectBrowser(window);
     // shim addTrack and removeTrack.
     if (window.RTCPeerConnection.prototype.addTrack &&
         browserDetails.version >= 64) {
-      return;
+      return this.shimAddTrackRemoveTrackWithNative(window);
     }
 
     // also shim pc.getLocalStreams when addTrack is shimmed
@@ -239,11 +316,11 @@ var chromeShim = {
     var origGetLocalStreams = window.RTCPeerConnection.prototype
         .getLocalStreams;
     window.RTCPeerConnection.prototype.getLocalStreams = function() {
-      var self = this;
+      var pc = this;
       var nativeStreams = origGetLocalStreams.apply(this);
-      self._reverseStreams = self._reverseStreams || {};
+      pc._reverseStreams = pc._reverseStreams || {};
       return nativeStreams.map(function(stream) {
-        return self._reverseStreams[stream.id];
+        return pc._reverseStreams[stream.id];
       });
     };
 
@@ -525,7 +602,7 @@ var chromeShim = {
     var origGetStats = window.RTCPeerConnection.prototype.getStats;
     window.RTCPeerConnection.prototype.getStats = function(selector,
         successCallback, errorCallback) {
-      var self = this;
+      var pc = this;
       var args = arguments;
 
       // If selector is a function then we are in the old style stats so just
@@ -580,7 +657,7 @@ var chromeShim = {
 
       // promise-support
       return new Promise(function(resolve, reject) {
-        origGetStats.apply(self, [
+        origGetStats.apply(pc, [
           function(response) {
             resolve(makeMapStats(fixChromeStats_(response)));
           }, reject]);
@@ -594,9 +671,9 @@ var chromeShim = {
             var nativeMethod = window.RTCPeerConnection.prototype[method];
             window.RTCPeerConnection.prototype[method] = function() {
               var args = arguments;
-              var self = this;
+              var pc = this;
               var promise = new Promise(function(resolve, reject) {
-                nativeMethod.apply(self, [args[0], resolve, reject]);
+                nativeMethod.apply(pc, [args[0], resolve, reject]);
               });
               if (args.length < 2) {
                 return promise;
@@ -619,12 +696,12 @@ var chromeShim = {
       ['createOffer', 'createAnswer'].forEach(function(method) {
         var nativeMethod = window.RTCPeerConnection.prototype[method];
         window.RTCPeerConnection.prototype[method] = function() {
-          var self = this;
+          var pc = this;
           if (arguments.length < 1 || (arguments.length === 1 &&
               typeof arguments[0] === 'object')) {
             var opts = arguments.length === 1 ? arguments[0] : undefined;
             return new Promise(function(resolve, reject) {
-              nativeMethod.apply(self, [resolve, reject, opts]);
+              nativeMethod.apply(pc, [resolve, reject, opts]);
             });
           }
           return nativeMethod.apply(this, arguments);
@@ -668,17 +745,4 @@ var chromeShim = {
 
       window.attachMediaStream = attachMediaStream;
   }
-};
-
-
-// Expose public methods.
-module.exports = {
-  shimMediaStream: chromeShim.shimMediaStream,
-  shimOnTrack: chromeShim.shimOnTrack,
-  shimAddTrackRemoveTrack: chromeShim.shimAddTrackRemoveTrack,
-  shimGetSendersWithDtmf: chromeShim.shimGetSendersWithDtmf,
-  shimSourceObject: chromeShim.shimSourceObject,
-  shimPeerConnection: chromeShim.shimPeerConnection,
-  shimGetUserMedia: require('./getusermedia'),
-  shimAttachMediaStream: chromeShim.shimAttachMediaStream
 };

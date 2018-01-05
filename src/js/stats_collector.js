@@ -352,28 +352,41 @@ var stats_collector = {
             };
 
             var origGetStats = origPeerConnection.prototype['getStats'];
-            pc.getStats = function(selector, successCallback, errorCallback) {
-                var pc = this;
-                
-                return new Promise(function(resolve, reject) {
-                    origGetStats.apply(pc, [ selector, function(response) {
-                            if (browserDetails.browser === 'chrome' || browserDetails.browser === 'opera') {
-                                statChromeStats(pc, response);
-                            } else if (browserDetails.browser === 'firefox') {
-                                statFirefoxStats(pc, response);
-                            } else if (browserDetails.browser === 'edge') {
-                                statEdgeStats(pc, response);
-                            } else if (browserDetails.isWebRTCPluginInstalled === true) {
-                                //For Plugin
-                                statChromeStats(pc, response);
-                            } else if (browserDetails.browser === 'safari') {
-                                statSafariStats(pc, response);
-                            } else {
-                                console.warn("Unknow browser!");
-                            }
-                            resolve(response);
-                        }, reject ]);
-                    }).then(successCallback, errorCallback)
+            if (browserDetails.browser != 'edge') {
+                pc.getStats = function(selector, successCallback, errorCallback) {
+                    var pc = this;
+                    
+                    return new Promise(function(resolve, reject) {
+                        origGetStats.apply(pc, [ selector, function(response) {
+                                if (browserDetails.browser === 'chrome' || browserDetails.browser === 'opera') {
+                                    statChromeStats(pc, response);
+                                } else if (browserDetails.browser === 'firefox') {
+                                    statFirefoxStats(pc, response);
+                                } else if (browserDetails.browser === 'edge') {
+                                    statEdgeStats(pc, response);
+                                } else if (browserDetails.isWebRTCPluginInstalled === true) {
+                                    //For Plugin
+                                    statChromeStats(pc, response);
+                                } else if (browserDetails.browser === 'safari') {
+                                    statSafariStats(pc, response);
+                                } else {
+                                    console.warn("Unknow browser!");
+                                }
+                                resolve(response);
+                            }, reject ]);
+                        }).then(successCallback, errorCallback)
+                }
+            } else {
+                pc.getStats = function(selector, successCallback, errorCallback) {
+                    var pc = this;
+
+                    return new Promise(function(resolve, reject) {
+                         origGetStats.apply(pc, [ selector ]).then(function(response) {
+                                   statEdgeStats(pc, response);
+                                   resolve(response);
+                               });
+                        }).then(successCallback, errorCallback)
+                }
             }
 
             return pc;

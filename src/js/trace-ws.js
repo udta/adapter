@@ -1,16 +1,25 @@
 var PROTOCOL_VERSION = '1.0';
 module.exports = function(wsURL) {
   var buffer = [];
-  var connection = new WebSocket(wsURL+'/stats', PROTOCOL_VERSION);
+  var confID = !window.sessionStorage.confID ? "UnKnown" : window.sessionStorage.confID;
+  var email  = !window.localStorage.email ? "Anonymous@x.com" : window.localStorage.email;
+  var id = confID + '__' + email + '__' + Math.random().toString(36).substr(2);
+
+  var connection = new WebSocket(wsURL+'/stats?id='+id, PROTOCOL_VERSION);
   connection.onerror = function(e) {
     console.log('WS ERROR', e);
   };
 
-  /*
+  
   connection.onclose = function() {
-    // reconnect?
+    // reconnect
+    var origConnection = connection;
+    connection = new WebSocket(wsURL + '/stats?id=' + id, PROTOCOL_VERSION); 
+    connection.onerror = origConnection.onerror;
+    connection.onclose = origConnection.onclose;
+    connection.onopen  = origConnection.onopen;
+    origConnection = null; //Delete
   };
-  */
 
   connection.onopen = function() {
     while (buffer.length) {

@@ -10,7 +10,8 @@
 
 var utils = require('../utils');
 
-var firefoxShim = {
+module.exports = {
+  shimGetUserMedia: require('./getusermedia'),
   shimOnTrack: function(window) {
     if (typeof window === 'object' && window.RTCPeerConnection && !('ontrack' in
         window.RTCPeerConnection.prototype)) {
@@ -211,28 +212,6 @@ var firefoxShim = {
           pc.removeTrack(sender);
     }
       });
-    };
-  },
-
-  // Attach a media stream to an element.
-  shimAttachMediaStream: function(window) {
-          var browserDetails = utils.detectBrowser(window);
-
-          var attachMediaStream = function(element, stream) {
-              element.src = URL.createObjectURL(stream);
-          }
-
-              window.attachMediaStream = attachMediaStream;
-      }
-};
-
-// Expose public methods.
-module.exports = {
-  shimOnTrack: firefoxShim.shimOnTrack,
-  shimSourceObject: firefoxShim.shimSourceObject,
-  shimPeerConnection: firefoxShim.shimPeerConnection,
-  shimRemoveStream: firefoxShim.shimRemoveStream,
-  shimGetUserMedia: require('./getusermedia'),
-  shimAttachMediaStream: firefoxShim.shimAttachMediaStream
-
+          };
+  }
 };
